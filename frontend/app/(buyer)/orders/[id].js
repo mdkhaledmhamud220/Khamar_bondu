@@ -1,0 +1,629 @@
+import { Ionicons } from "@expo/vector-icons";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useEffect, useState } from "react";
+import { Alert } from "react-native";
+import {
+    ActivityIndicator,
+    Image,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
+} from "react-native";
+import {
+    BorderRadius,
+    Colors,
+    FontSize,
+    Shadow,
+    Spacing,
+} from "../../../constants/theme";
+
+// Mock data - same as home.js
+const MOCK_COWS = [
+  {
+    id: "c1",
+    name: "লক্ষ্মী",
+    breed: "দেশি",
+    ageMonths: 26,
+    weightKg: 315,
+    district: "রাজশাহী",
+    price: 145000,
+    gender: "female",
+    status: "sold",
+    order_status: "completed",
+    healthScore: 88,
+    healthGrade: "A",
+    photos: [],
+    description: "উৎপাদনশীল দুধের গরু",
+    vaccination: "সম্পূর্ণ",
+    lastHealthCheck: "2026-03-15",
+    sellerName: "কৃষক রহিম",
+    sellerPhone: "01700000001",
+  },
+  {
+    id: "c2",
+    name: "বাদশা",
+    breed: "শাহীওয়াল",
+    ageMonths: 32,
+    weightKg: 410,
+    district: "ঢাকা",
+    price: 210000,
+    gender: "male",
+    status: "reserved",
+    order_status: "confirmed",
+    healthScore: 81,
+    healthGrade: "A-",
+    photos: [],
+    description: "শক্তিশালী ষাঁড়",
+    vaccination: "সম্পূর্ণ",
+    lastHealthCheck: "2026-03-20",
+    sellerName: "কৃষক করিম",
+    sellerPhone: "01700000002",
+  },
+  {
+    id: "c3",
+    name: "চাঁদনী",
+    breed: "ফ্রিজিয়ান",
+    ageMonths: 24,
+    weightKg: 360,
+    district: "কুমিল্লা",
+    price: 175000,
+    gender: "female",
+    status: "sold",
+    order_status: "completed",
+    healthScore: 74,
+    healthGrade: "B",
+    photos: [],
+    description: "উচ্চ দুধ উৎপাদনশীল",
+    vaccination: "আংশিক",
+    lastHealthCheck: "2026-03-10",
+    sellerName: "কৃষক হাসান",
+    sellerPhone: "01700000003",
+  },
+  {
+    id: "c4",
+    name: "বিজয়",
+    breed: "ব্রাহমান",
+    ageMonths: 36,
+    weightKg: 460,
+    district: "নওগাঁ",
+    price: 255000,
+    gender: "male",
+    status: "available",
+    order_status: "pending",
+    healthScore: 69,
+    healthGrade: "C+",
+    photos: [],
+    description: "মাংস উৎপাদনের জন্য ভালো",
+    vaccination: "সম্পূর্ণ",
+    lastHealthCheck: "2026-03-08",
+    sellerName: "কৃষক আবু",
+    sellerPhone: "01700000004",
+  },
+  {
+    id: "c5",
+    name: "নূর",
+    breed: "হরিয়ানা",
+    ageMonths: 28,
+    weightKg: 390,
+    district: "সিরাজগঞ্জ",
+    price: 198000,
+    gender: "female",
+    status: "reserved",
+    order_status: "confirmed",
+    healthScore: 63,
+    healthGrade: "C",
+    photos: [],
+    description: "মাঝারি দুধ উৎপাদন",
+    vaccination: "চলমান",
+    lastHealthCheck: "2026-02-28",
+    sellerName: "কৃষক ফারিদ",
+    sellerPhone: "01700000005",
+  },
+];
+
+function DetailRow({ icon, label, value }) {
+  return (
+    <View style={styles.detailRow}>
+      <View style={styles.detailIcon}>
+        <Ionicons name={icon} size={18} color={Colors.primary} />
+      </View>
+      <View style={styles.detailContent}>
+        <Text style={styles.detailLabel}>{label}</Text>
+        <Text style={styles.detailValue}>{value}</Text>
+      </View>
+    </View>
+  );
+}
+
+export default function CowDetailsScreen() {
+  const router = useRouter();
+  const { id } = useLocalSearchParams();
+  const [cow, setCow] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    const loadCow = async () => {
+      try {
+        setError(null);
+        // Simulate API call
+        await new Promise((resolve) => setTimeout(resolve, 300));
+
+        // Find cow from mock data
+        const foundCow = MOCK_COWS.find((c) => c.id === id);
+        if (foundCow) {
+          setCow(foundCow);
+        } else {
+          setError("গরু তথ্য পাওয়া যায়নি।");
+        }
+      } catch (e) {
+        setError("তথ্য লোড করতে সমস্যা হয়েছে।");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadCow();
+  }, [id]);
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={styles.loadingText}>লোড হচ্ছে...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  if (error || !cow) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="chevron-back" size={28} color={Colors.white} />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.center}>
+          <Text style={styles.errorText}>{error}</Text>
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={() => router.back()}
+          >
+            <Text style={styles.backBtnText}>ফিরে যান</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()}>
+          <Ionicons name="chevron-back" size={28} color={Colors.white} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>{cow.name}</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
+      <ScrollView
+        style={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: 100 }}
+      >
+        {/* Photo */}
+        <View style={styles.photoWrap}>
+          {cow.photos?.length > 0 ? (
+            <Image
+              source={{ uri: cow.photos[0] }}
+              style={styles.photo}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={styles.photoPlaceholder}>
+              <Text style={styles.photoEmoji}>🐄</Text>
+            </View>
+          )}
+          <View
+            style={[
+              styles.statusBadgeLarge,
+              cow.status === "available"
+                ? styles.statusAvailable
+                : styles.statusReserved,
+            ]}
+          >
+            <Text style={styles.statusText}>
+              {cow.status === "available" ? "পাওয়া যাচ্ছে" : "বুকড"}
+            </Text>
+          </View>
+        </View>
+
+        {/* Main Info */}
+        <View style={styles.mainInfo}>
+          <View style={styles.titleRow}>
+            <View>
+              <Text style={styles.breedText}>{cow.breed}</Text>
+              <Text style={styles.nameText}>{cow.name}</Text>
+            </View>
+            <View
+              style={[
+                styles.healthBadgeLarge,
+                {
+                  backgroundColor:
+                    cow.healthScore >= 85
+                      ? Colors.healthExcellent + "20"
+                      : cow.healthScore >= 70
+                        ? Colors.healthGood + "20"
+                        : cow.healthScore >= 50
+                          ? Colors.healthAverage + "20"
+                          : cow.healthScore >= 30
+                            ? Colors.healthWeak + "20"
+                            : Colors.healthBad + "20",
+                  borderColor:
+                    cow.healthScore >= 85
+                      ? Colors.healthExcellent
+                      : cow.healthScore >= 70
+                        ? Colors.healthGood
+                        : cow.healthScore >= 50
+                          ? Colors.healthAverage
+                          : cow.healthScore >= 30
+                            ? Colors.healthWeak
+                            : Colors.healthBad,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.healthScoreLarge,
+                  {
+                    color:
+                      cow.healthScore >= 85
+                        ? Colors.healthExcellent
+                        : cow.healthScore >= 70
+                          ? Colors.healthGood
+                          : cow.healthScore >= 50
+                            ? Colors.healthAverage
+                            : cow.healthScore >= 30
+                              ? Colors.healthWeak
+                              : Colors.healthBad,
+                  },
+                ]}
+              >
+                {cow.healthScore}
+              </Text>
+              <Text style={styles.healthGradeLarge}>{cow.healthGrade}</Text>
+            </View>
+          </View>
+
+          <Text style={styles.priceText}>
+            ৳ {cow.price?.toLocaleString("bn-BD")}
+          </Text>
+          <Text style={styles.descriptionText}>{cow.description}</Text>
+        </View>
+
+        {/* Details Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>প্রধান তথ্য</Text>
+          <View style={styles.card}>
+            <DetailRow
+              icon="person-outline"
+              label="লিঙ্গ"
+              value={cow.gender === "male" ? "♂ ষাঁড়" : "♀ গাভী"}
+            />
+            <View style={styles.divider} />
+            <DetailRow
+              icon="calendar-outline"
+              label="বয়স"
+              value={`${cow.ageMonths} মাস`}
+            />
+            <View style={styles.divider} />
+            <DetailRow
+              icon="barbell-outline"
+              label="ওজন"
+              value={`${cow.weightKg} কেজি`}
+            />
+            <View style={styles.divider} />
+            <DetailRow
+              icon="location-outline"
+              label="অবস্থান"
+              value={cow.district}
+            />
+          </View>
+        </View>
+
+        {/* Health Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>স্বাস্থ্য তথ্য</Text>
+          <View style={styles.card}>
+            <DetailRow
+              icon="medical-outline"
+              label="টিকাকরণ"
+              value={cow.vaccination}
+            />
+            <View style={styles.divider} />
+            <DetailRow
+              icon="checkmark-done-outline"
+              label="সর্বশেষ চেকআপ"
+              value={cow.lastHealthCheck}
+            />
+          </View>
+        </View>
+
+        {/* Seller Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>বিক্রেতার তথ্য</Text>
+          <View style={styles.card}>
+            <DetailRow
+              icon="person-circle-outline"
+              label="বিক্রেতা"
+              value={cow.sellerName}
+            />
+            <View style={styles.divider} />
+            <DetailRow
+              icon="call-outline"
+              label="ফোন"
+              value={cow.sellerPhone}
+            />
+          </View>
+        </View>
+
+        {/* Action Buttons */}
+
+
+        <View style={styles.actionSection}>
+        {/* Contact button সবসময় থাকবে */}
+        <TouchableOpacity
+          style={styles.contactBtn}
+          onPress={() => router.push(`./../chat/${cow.id}`)}
+        >
+          <Ionicons name="call" size={18} color={Colors.white} />
+          <Text style={styles.contactBtnText}>যোগাযোগ করুন</Text>
+        </TouchableOpacity>
+
+        {/* Dynamic Order Button */}
+        {!cow.order_status && cow.status === "available" && (
+        <TouchableOpacity style={styles.bookBtn}>
+            <Ionicons name="checkmark-circle" size={18} color={Colors.primary} />
+            <Text style={styles.bookBtnText}>বুকিং করুন</Text>
+        </TouchableOpacity>
+        )}
+
+        {cow.order_status === "pending" && (
+        <TouchableOpacity style={[styles.bookBtn, styles.warningBtn]}>
+            <Ionicons name="close-circle" size={18} color={Colors.warning} />
+            <Text style={[styles.bookBtnText, { color: Colors.warning }]}>
+            Cancel Request
+            </Text>
+        </TouchableOpacity>
+        )}
+
+        {cow.order_status === "confirmed" && (
+        <TouchableOpacity style={[styles.bookBtn, styles.dangerBtn]}>
+            <Ionicons name="close" size={18} color={Colors.error} />
+            <Text style={[styles.bookBtnText, { color: Colors.error }]}>
+            Cancel Order
+            </Text>
+        </TouchableOpacity>
+        )}
+
+        {/* completed / cancelled → কিছুই দেখাবে না */}
+      </View>
+      </ScrollView>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: Colors.background },
+
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: Colors.primary,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: 54,
+    paddingBottom: Spacing.lg,
+  },
+  headerTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: "700",
+    color: Colors.white,
+  },
+  headerSpacer: { width: 28 },
+
+  scroll: { flex: 1 },
+
+  photoWrap: {
+    height: 280,
+    position: "relative",
+    overflow: "hidden",
+  },
+  photo: { width: "100%", height: "100%" },
+  photoPlaceholder: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: Colors.accentPale,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  photoEmoji: { fontSize: 80 },
+
+  statusBadgeLarge: {
+    position: "absolute",
+    top: 12,
+    left: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: BorderRadius.full,
+  },
+  statusAvailable: { backgroundColor: Colors.primary },
+  statusReserved: { backgroundColor: Colors.warning },
+  statusText: { color: Colors.white, fontSize: FontSize.md, fontWeight: "700" },
+
+  mainInfo: { padding: Spacing.lg, backgroundColor: Colors.white },
+  titleRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: Spacing.md,
+  },
+  breedText: {
+    fontSize: FontSize.sm,
+    color: Colors.textMuted,
+    fontWeight: "500",
+    marginBottom: 4,
+  },
+  nameText: {
+    fontSize: FontSize.xxl,
+    fontWeight: "800",
+    color: Colors.textPrimary,
+  },
+
+  healthBadgeLarge: {
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderWidth: 2,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  healthScoreLarge: { fontSize: FontSize.xl, fontWeight: "800" },
+  healthGradeLarge: { fontSize: FontSize.sm, fontWeight: "700", marginTop: 2 },
+
+  priceText: {
+    fontSize: FontSize.xxxl,
+    fontWeight: "800",
+    color: Colors.primary,
+    marginBottom: Spacing.sm,
+  },
+  descriptionText: {
+    fontSize: FontSize.md,
+    color: Colors.textSecondary,
+    lineHeight: 22,
+  },
+
+  section: {
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+  },
+  sectionTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: "700",
+    color: Colors.textPrimary,
+    marginBottom: Spacing.md,
+  },
+
+  card: {
+    backgroundColor: Colors.white,
+    borderRadius: BorderRadius.lg,
+    overflow: "hidden",
+    ...Shadow.sm,
+  },
+  detailRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+  },
+  detailIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.accentPale,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  detailContent: { flex: 1 },
+  detailLabel: {
+    fontSize: FontSize.sm,
+    color: Colors.textMuted,
+    marginBottom: 4,
+  },
+  detailValue: {
+    fontSize: FontSize.md,
+    fontWeight: "600",
+    color: Colors.textPrimary,
+  },
+
+  divider: {
+    height: 1,
+    backgroundColor: Colors.border,
+    marginHorizontal: Spacing.md,
+  },
+
+  actionSection: {
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    gap: Spacing.md,
+    flexDirection: "row",
+  },
+  contactBtn: {
+    flex: 1,
+    backgroundColor: Colors.primary,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.md,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.sm,
+    ...Shadow.sm,
+  },
+  contactBtnText: {
+    color: Colors.white,
+    fontWeight: "700",
+    fontSize: FontSize.md,
+  },
+  bookBtn: {
+    flex: 1,
+    backgroundColor: Colors.white,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 2,
+    borderColor: Colors.primary,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.sm,
+  },
+  bookBtnText: {
+    color: Colors.primary,
+    fontWeight: "700",
+    fontSize: FontSize.md,
+  },
+
+  center: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.md,
+  },
+  loadingText: { color: Colors.textMuted, fontSize: FontSize.md },
+  errorText: {
+    color: Colors.error,
+    fontSize: FontSize.md,
+    textAlign: "center",
+  },
+  backBtn: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.md,
+  },
+  backBtnText: { color: Colors.white, fontWeight: "600" },
+  warningBtn: {
+  borderColor: Colors.warning,
+  backgroundColor: Colors.warning + "10",
+},
+
+dangerBtn: {
+  borderColor: Colors.error,
+  backgroundColor: Colors.error + "10",
+},
+});
