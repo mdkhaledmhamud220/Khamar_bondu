@@ -6,9 +6,11 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-// import { useAuth } from '../../context/AuthContext';
-// import api from '../../config/api';
+import { useFarm } from '../../../context/FarmContext'
 import { Colors, FontSize, Spacing, BorderRadius, Shadow } from '../../../constants/theme';
+import { auth, rtdb, db} from '../../../firebaseConfig';
+import { ref, get } from 'firebase/database';
+import { doc, getDoc } from "firebase/firestore";
 
 function timeAgo(isoString) {
   if (!isoString) return '';
@@ -49,7 +51,7 @@ function ConversationCard({ conv, currentUid, onPress }) {
         </View>
 
         <Text style={conv.unread > 0 ? styles.bold : styles.convLast } numberOfLines={1}>
-          {conv.sender === "you" ? `আপনি: ${conv.lastMessage}` : conv.lastMessage || 'কথোপকথন শুরু করুন...'}
+          {conv.sender === auth.currentUser.uid ? `আপনি: ${conv.lastMessage}` : conv.lastMessage || 'কথোপকথন শুরু করুন...'}
         </Text>
 
         {/* cow সম্পর্কিত */}
@@ -68,17 +70,29 @@ function ConversationCard({ conv, currentUid, onPress }) {
   );
 }
 
+function sortConversations(conversations) {
+  return conversations.sort((a, b) => {
+    const timeA = new Date(a.time || 0).getTime();
+    const timeB = new Date(b.time || 0).getTime();
+    console.log(timeA);
+    console.log(timeB);
+
+
+    return timeB - timeA; // Latest first
+  });
+}
+
 export default function ChatListScreen() {
   const router = useRouter();
-  // const { user } = useAuth();
-  // MOCK USER
-  const user = {
-    uid: 'user1'
-  };
+  const [currentUserId, setCurrentUserId] = useState(null);
   const [convs,      setConvs]      = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search,     setSearch]     = useState('');
+  const { selectedFarm } = useFarm();
+  const farmId = selectedFarm?.id;
+  console.log('farm')
+  console.log(farmId);
 
   // const loadConvs = useCallback(async () => {
   //   try {
@@ -95,92 +109,98 @@ export default function ChatListScreen() {
   const loadConvs = useCallback(async () => {
     setLoading(true);
 
-    // ── MOCK CONVERSATIONS ─────────────────────
-    const mockConvs = [
-      {
-        id: "1",
-        name: "করিম খামার",
-        lastMessage: "গরুটি কি এখনও বিক্রয়ের জন্য আছে?",
-        sender: "you",
-        time: "২ মিনিট আগে",
-        unread: 0,
-        online: true,
-        avatar: "ক",
-        cow: {
-          id: "c1",
-          name: "দেশি গরু",
-          price: 85000,
-        },
-      },
-      {
-        id: "2",
-        name: "রহমান খামার",
-        lastMessage: "ধন্যবাদ, আমি আগ্রহী",
-        sender: "other",
-        time: "১৫ মিনিট আগে",
-        unread: 0,
-        online: false,
-        avatar: "র",
-        cow: {
-          id: "c2",
-          name: "ফ্রিজিয়ান",
-          price: 120000,
-        },
-      },
-      {
-        id: "3",
-        name: "সালাম খামার",
-        lastMessage: "গরুটি দেখাতে পারব",
-        sender: "other",
-        time: "১ ঘন্টা আগে",
-        unread: 2,
-        online: true,
-        avatar: "স",
-        cow: {
-          id: "c3",
-          name: "সাহিওয়াল",
-          price: 95000,
-        },
-      },
-      {
-        id: "4",
-        name: "মিজান ডেইরি",
-        lastMessage: "কাল সকালে আসেন",
-        sender: "other",
-        time: "৩ ঘন্টা আগে",
-        unread: 1,
-        online: false,
-        avatar: "ম",
-        cow: {
-          id: "c4",
-          name: "জার্সি",
-          price: 110000,
-        },
-      },
-      {
-        id: "5",
-        name: "হাসান খামার",
-        lastMessage: "",
-        sender: "",
-        time: "২ দিন আগে",
-        unread: 0,
-        online: false,
-        avatar: "হ",
-        cow: {
-          id: "c5",
-          name: "দেশি ক্রস",
-          price: 78000,
-        },
-      },
-    ];
+    try {
+      const currentUser = auth.currentUser;
+      
+      if (!currentUser) {
+        setConvs([]);
+        return;
+      }
 
-    // fake delay
-    setTimeout(() => {
-      setConvs(mockConvs);
+      setCurrentUserId(currentUser.uid);
+
+      const convSnap = await get(ref(rtdb, "conversations"));
+      const convVal = convSnap.val() || {};
+
+      const loaded = await Promise.all(
+        Object.entries(convVal)
+          .map(([id, data]) => ({ id, ...data }))
+          .filter(
+            (c) =>
+              Array.isArray(c.participants) &&
+              c.participants.includes(currentUser.uid)
+          )
+          .map(async (conv) => {
+            // ===== Other user =====
+            const otherUserId = conv.participants.find(
+              (id) => id !== currentUser.uid
+            );
+
+            let userData = {};
+
+            if (otherUserId) {
+              const userDoc = await getDoc(doc(db, "users", otherUserId));
+
+              if (userDoc.exists()) {
+                userData = userDoc.data();
+              }
+            }
+
+            // ===== Cow =====
+            let cowData = {};
+
+            if (conv.cowId) {
+              const cowDoc = await getDoc(doc(db, "cows", conv.cowId));
+
+              if (cowDoc.exists()) {
+                cowData = cowDoc.data();
+              }
+            }
+            console.log('cowdata.farm_id');
+            console.log(cowData.farm_id)
+
+            if(cowData.farm_id !== farmId){
+              console.log('dukse');
+              return null;
+            }
+
+            return {
+              id: conv.id,
+
+              // User Info
+              name: userData.name || "Unknown User",
+              online: userData.online || false,
+              avatar: userData.avatar || "🐄",
+
+              // Conversation
+              participants: conv.participants || [],
+              lastMessage: conv.last_message || "",
+              sender: conv.last_sender || "",
+              time: conv.last_message_at || "",
+              unread: conv.unread_count || 0,
+
+              // Cow Info
+              cow: {
+                id: conv.cowId,
+                name: cowData.name || "",
+                price: cowData.sale_price || 0,
+              },
+            };
+          })
+      );
+      
+      const filteredLoaded = sortConversations(loaded.filter(Boolean));
+
+      console.log(filteredLoaded);
+
+      setConvs(filteredLoaded);
+    } catch (err) {
+      console.error(err);
+      setConvs([]);
+    } finally {
       setLoading(false);
       setRefreshing(false);
-    }, 500);
-
+    }
   }, []);
 
   useEffect(() => { loadConvs(); }, [loadConvs]);
@@ -241,7 +261,7 @@ export default function ChatListScreen() {
           renderItem={({ item }) => (
             <ConversationCard
               conv={item}
-              currentUid={user?.uid}
+              currentUid={currentUserId}
               onPress={() => router.push(`./../chat/${item.id}`)}
             />
           )}
@@ -254,9 +274,9 @@ export default function ChatListScreen() {
               </Text>
               <TouchableOpacity
                 style={styles.emptyBtn}
-                onPress={() => router.push('/(tabs)/home')}
+                onPress={() => router.push('./home')}
               >
-                <Text style={styles.emptyBtnText}>গরু দেখুন →</Text>
+                <Text style={styles.emptyBtnText}>ড্যাসবোর্ড এ যান →</Text>
               </TouchableOpacity>
             </View>
           }

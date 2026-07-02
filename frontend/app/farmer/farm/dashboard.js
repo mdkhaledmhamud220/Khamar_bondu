@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useState } from "react";
 import {
     ActivityIndicator,
@@ -20,38 +20,47 @@ import {
     Spacing,
 } from "../../../constants/theme";
 import { useAuth } from "../../../context/AuthContext";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { auth as firebaseAuth, db } from "../../../firebaseConfig";
 
-const MOCK_MY_COWS = [
-  {
-    id: "c1",
-    name: "রানি",
-    breed: "দেশি",
-    ageMonths: 28,
-    weightKg: 320,
-    district: "রাজশাহী",
-    price: 150000,
-    gender: "female",
-    status: "available",
-    healthScore: 85,
-    healthGrade: "A",
-    photos: [],
-    milkProduction: 15,
-  },
-  {
-    id: "c2",
-    name: "সোনা",
-    breed: "ফ্রিজিয়ান",
-    ageMonths: 30,
-    weightKg: 370,
-    price: 185000,
-    gender: "female",
-    status: "available",
-    healthScore: 80,
-    healthGrade: "A-",
-    photos: [],
-    milkProduction: 20,
-  },
-];
+const toNumber = (value) => Number(value) || 0;
+
+const toDate = (value) => {
+  if (!value) return null;
+  if (value?.toDate) return value.toDate();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const normalizeCow = (doc) => ({
+  id: doc.id,
+  ...doc,
+  farm_id: doc.farm_id ?? doc.farmId ?? null,
+  name: doc.name || "নামহীন গরু",
+  breed: doc.breed || "",
+  gender: doc.gender || "",
+  age_months: toNumber(doc.age_months ?? doc.ageMonths),
+  weight_kg: toNumber(doc.weight_kg ?? doc.weightKg),
+  price: toNumber(doc.price),
+  sale_price: toNumber(doc.sale_price ?? doc.salePrice),
+  health_score: toNumber(doc.health_score ?? doc.healthScore),
+  status: doc.status || "draft",
+  photos: Array.isArray(doc.photos) ? doc.photos : [],
+  milkProduction: toNumber(doc.milkProduction),
+});
+
+const normalizeMilkLog = (doc) => ({
+  id: doc.id,
+  ...doc,
+  cow_id: doc.cow_id ?? doc.cowId ?? null,
+  log_date: doc.log_date ?? doc.logDate ?? null,
+  morning_liters: toNumber(doc.morning_liters ?? doc.morningLiters),
+  evening_liters: toNumber(doc.evening_liters ?? doc.eveningLiters),
+  total_liters: toNumber(doc.total_liters ?? doc.totalLiters),
+  sold_liters: toNumber(doc.sold_liters ?? doc.soldLiters),
+  price_per_liter: toNumber(doc.price_per_liter ?? doc.pricePerLiter),
+  income: toNumber(doc.income),
+});
 
 function FarmCard({ cow, onPress }) {
   return (
@@ -83,7 +92,7 @@ function FarmCard({ cow, onPress }) {
           </View>
           <View style={styles.statItem}>
             <Ionicons name="heart-outline" size={14} color={Colors.warning} />
-            <Text style={styles.statText}>{cow.healthScore}</Text>
+            <Text style={styles.statText}>{cow.health_score}</Text>
           </View>
           <View style={styles.statItem}>
             <Ionicons
@@ -91,7 +100,7 @@ function FarmCard({ cow, onPress }) {
               size={14}
               color={Colors.primaryMid}
             />
-            <Text style={styles.statText}>{cow.weightKg}kg</Text>
+            <Text style={styles.statText}>{cow.weight_kg}kg</Text>
           </View>
         </View>
       </View>
@@ -107,19 +116,125 @@ export default function FarmerHomeScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const { farmId } = useLocalSearchParams();
 
+  // ৪. ফায়ারস্টোর থেকে বর্তমান ইউজারের গরুর তালিকা নিয়ে আসার ফাংশন
   const fetchMyCows = useCallback(async () => {
     try {
       setError(null);
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      setMyCows(MOCK_MY_COWS);
+      const user = firebaseAuth.currentUser;
+      if (!user) {
+        setError("অনুগ্রহ করে আগে লগইন করুন।");
+        return;
+      }
+
+      const usersSnap = await getDocs(
+        query(collection(db, "users"), where("firebase_uid", "==", user.uid)),
+      );
+
+      const userDoc = usersSnap.docs[0];
+      const userId = userDoc?.id || user.uid;
+
+      const resolvedFarmId = Array.isArray(farmId) ? farmId[0] : farmId;
+      const selectedFarmIds = resolvedFarmId ? [String(resolvedFarmId)] : [];
+
+      if (selectedFarmIds.length === 0) {
+        const farmsSnap = await getDocs(
+          query(collection(db, "farms"), where("farmer_id", "==", userId)),
+        );
+
+        farmsSnap.docs.forEach((doc) => {
+          selectedFarmIds.push(doc.id);
+        });
+      }
+
+      if (selectedFarmIds.length === 0) {
+        setError("আপনার জন্য কোনো খামার পাওয়া যায়নি।");
+        setMyCows([]);
+        return;
+      }
+
+      const cowSnapshots = await Promise.all(
+        selectedFarmIds.map((selectedFarmId) =>
+          getDocs(
+            query(
+              collection(db, "cows"),
+              where("farm_id", "==", selectedFarmId),
+            ),
+          ),
+        ),
+      );
+
+      const cowsList = cowSnapshots.flatMap((snapshot) =>
+        snapshot.docs.map((doc) =>
+          normalizeCow({ id: doc.id, ...doc.data() }),
+        ),
+      );
+
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      const cowsWithMilkStats = await Promise.all(
+        cowsList.map(async (cow) => {
+          const photosSnap = await getDocs(
+            query(
+              collection(db, "cow_photos"),
+              where("cow_id", "==", cow.id),
+            ),
+          );
+
+          const photos = photosSnap.docs
+            .map((doc) => ({ id: doc.id, ...doc.data() }))
+            .sort((a, b) => {
+              if (!!a.is_primary !== !!b.is_primary) {
+                return a.is_primary ? -1 : 1;
+              }
+              return (a.sort_order || 0) - (b.sort_order || 0);
+            });
+
+          const logsSnap = await getDocs(
+            query(collection(db, "milk_logs"), where("cow_id", "==", cow.id)),
+          );
+
+          const logs = logsSnap.docs
+            .map((doc) => normalizeMilkLog({ id: doc.id, ...doc.data() }))
+            .sort((a, b) => {
+              const aDate = toDate(a.log_date)?.getTime() || 0;
+              const bDate = toDate(b.log_date)?.getTime() || 0;
+              return bDate - aDate;
+            });
+
+          const totalMilk = logs.reduce(
+            (sum, log) => sum + (log.total_liters || 0),
+            0,
+          );
+          const latestLog = logs[0];
+          const milkLast30Days = logs.reduce((sum, log) => {
+            const logDate = toDate(log.log_date);
+            if (logDate && logDate >= thirtyDaysAgo) {
+              return sum + (log.total_liters || 0);
+            }
+            return sum;
+          }, 0);
+
+          return {
+            ...cow,
+            milkProduction: milkLast30Days || totalMilk,
+            photos: photos.map((photo) => photo.url).filter(Boolean),
+            latestMilkLiters: latestLog?.total_liters || 0,
+          };
+        }),
+      );
+
+      setMyCows(cowsWithMilkStats);
     } catch (e) {
-      setError("আপনার গরু তালিকা লোড করা যায়নি।");
+      console.log(e);
+      setError("আপনার গরুর তালিকা লোড করা যায়নি।");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [farmId]);
 
   useEffect(() => {
     fetchMyCows();
@@ -165,14 +280,16 @@ export default function FarmerHomeScreen() {
         </View>
         <View style={styles.statBox}>
           <Text style={styles.statNumber}>
-            {myCows.reduce((sum, c) => sum + (c.milkProduction || 0), 0)}L
+            {myCows
+              .reduce((sum, c) => sum + (c.milkProduction || 0), 0)
+              .toFixed(1)}L
           </Text>
           <Text style={styles.statLabel}>মোট দুধ</Text>
         </View>
         <View style={styles.statBox}>
           <Text style={styles.statNumber}>
             {Math.round(
-              myCows.reduce((sum, c) => sum + c.healthScore, 0) /
+              myCows.reduce((sum, c) => sum + (c.health_score || 0), 0) /
                 (myCows.length || 1),
             )}
           </Text>
@@ -220,7 +337,7 @@ export default function FarmerHomeScreen() {
               <Text style={styles.emptyText}>কোনো গরু যোগ করেননি</Text>
               <TouchableOpacity
                 style={styles.addFirstBtn}
-                onPress={() => router.push("./../cows/add")}
+                onPress={() => router.push(`./../cows/add?farmId=${farmId}`)}
               >
                 <Text style={styles.addFirstText}>+ প্রথম গরু যোগ করুন</Text>
               </TouchableOpacity>
@@ -231,7 +348,7 @@ export default function FarmerHomeScreen() {
 
       <TouchableOpacity
         style={styles.fab}
-        onPress={() => router.push("./../cows/add")}
+        onPress={() => router.push(`./../cows/add?farmId=${farmId}`)}
         activeOpacity={0.9}
       >
         <LinearGradient

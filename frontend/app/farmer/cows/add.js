@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { useState } from "react";
 import {
   Alert,
@@ -23,6 +23,13 @@ import {
   Shadow,
   Spacing,
 } from "../../../constants/theme";
+import {
+  addDoc,
+  collection,
+  serverTimestamp,
+} from "firebase/firestore";
+
+import { auth, db } from "../../../firebaseConfig";
 
 const BREEDS = [
   "দেশি",
@@ -35,18 +42,6 @@ const BREEDS = [
 const GENDERS = [
   { key: "male", label: "♂ ষাঁড়" },
   { key: "female", label: "♀ গাভী" },
-];
-const DISTRICTS = [
-  "ঢাকা",
-  "চট্টগ্রাম",
-  "রাজশাহী",
-  "খুলনা",
-  "বরিশাল",
-  "সিলেট",
-  "রংপুর",
-  "ময়মনসিংহ",
-  "কুমিল্লা",
-  "গাজীপুর",
 ];
 
 export default function AddCowScreen() {
@@ -63,6 +58,7 @@ export default function AddCowScreen() {
   const [isForSale, setIsForSale] = useState(true);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
+  const { farmId } = useLocalSearchParams();
 
   const validate = () => {
     const e = {};
@@ -75,36 +71,62 @@ export default function AddCowScreen() {
       e.weightKg = "সঠিক ওজন দিন";
     if (!price) e.price = "মূল্য লিখুন";
     else if (isNaN(price) || Number(price) <= 0) e.price = "সঠিক মূল্য দিন";
-    if (!district) e.district = "জেলা নির্বাচন করুন";
+    
     setErrors(e);
     return Object.keys(e).length === 0;
   };
 
   const handleSubmit = async () => {
     if (!validate()) return;
+
+    const user = auth.currentUser;
+    if (!user) {
+      Alert.alert("ত্রুটি", "দয়া করে আগে লগইন করুন।");
+      return;
+    }
+
+    if (!farmId) {
+      Alert.alert("ত্রুটি", "কোনো খামার আইডি পাওয়া যায়নি। সঠিক খামার থেকে নতুন গরু যোগ করুন।");
+      return;
+    }
+
     setLoading(true);
     try {
-      const res = await api.post("/cows", {
-        name,
-        breed,
-        gender,
-        ageMonths: Number(ageMonths),
-        weightKg: Number(weightKg),
+      // ১. Health Score হিসাব করুন (একটি সাধারণ ডামি লজিক)
+      const healthScore = regularFeeding ? 85 : 60;
+
+      // ২. COWS স্কিমা অনুযায়ী ফায়ারস্টোরের রুট কালেকশনে ডাটা সেভ করুন
+      const cowsCollection = collection(db, "cows");
+      const newCowRef = await addDoc(cowsCollection, {
+        farm_id: farmId,               // FK -> farms কালেকশনের ID
+        farmer_id: user.uid,           // রুট কুয়েরি সহজ করতে ফরেন কি
+        name: name.trim() || "নামহীন গরু",
+        breed: breed,
+        gender: gender,
+        age_months: Number(ageMonths),
+        weight_kg: Number(weightKg),
         price: Number(price),
-        district,
-        description,
-        regularFeeding,
-        isForSale,
+        status: isForSale ? "available" : "draft", // বিক্রির জন্য হলে available, না হলে draft
+        health_score: healthScore,
+        sale_price: null,
+        sale_date: null,
+        description: description.trim(),
+        regular_feeding: regularFeeding,
+        created_at: serverTimestamp()
       });
+
+      console.log("Firestore-এ গরু যোগ করা সফল হয়েছে!");
+
       Alert.alert("✅ সফল!", "গরু সফলভাবে যোগ করা হয়েছে।", [
         {
           text: "দেখুন",
-          onPress: () => router.replace(`/cows/${res.data.data.id}`),
+          onPress: () => router.replace(`/cows/${newCowRef.id}`),
         },
-        { text: "আরো যোগ করুন", onPress: () => router.replace("/cows/add") },
+        { text: "আরো যোগ করুন", onPress: () => router.replace(`/cows/add?farmId=${farmId}`) },
       ]);
     } catch (err) {
-      Alert.alert("ত্রুটি", err.userMessage || "গরু যোগ করা যায়নি।");
+      console.log(err);
+      Alert.alert("ত্রুটি", "গরু যোগ করা যায়নি। আবার চেষ্টা করুন।");
     } finally {
       setLoading(false);
     }
@@ -232,31 +254,8 @@ export default function AddCowScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}>📍 অবস্থান ও বিবরণ</Text>
+          <Text style={styles.sectionTitle}> বিবরণ</Text>
 
-          {/* District */}
-          <Text style={styles.fieldLabel}>জেলা *</Text>
-          {errors.district && (
-            <Text style={styles.errorText}>{errors.district}</Text>
-          )}
-          <View style={styles.chipRow}>
-            {DISTRICTS.map((d) => (
-              <TouchableOpacity
-                key={d}
-                style={[styles.chip, district === d && styles.chipActive]}
-                onPress={() => setDistrict(d)}
-              >
-                <Text
-                  style={[
-                    styles.chipText,
-                    district === d && styles.chipTextActive,
-                  ]}
-                >
-                  {d}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
 
           <Input
             label="বিবরণ (ঐচ্ছিক)"

@@ -1,0 +1,202 @@
+<div id="erd" style="padding: 8px 0"></div>
+<script type="module">
+  import mermaid from "https://esm.sh/mermaid@11/dist/mermaid.esm.min.mjs";
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  await document.fonts.ready;
+  mermaid.initialize({
+    startOnLoad: false,
+    // theme: "base",
+    fontFamily: '"Anthropic Sans", sans-serif',
+    themeVariables: {
+      darkMode: dark,
+      fontSize: "20px",
+      fontFamily: '"Anthropic Sans", sans-serif',
+      lineColor: "#FF2C2C",
+      textColor: "#000000",
+    },
+  });
+  const { svg } = await mermaid.render(
+    "erd-svg",
+    `erDiagram
+  USERS {
+    uuid id PK
+    string firebase_uid
+    string name
+    string email
+    string phone
+    enum role
+    string district
+    boolean is_verified
+    boolean is_active
+    timestamptz created_at
+  }
+  FARMS {
+    uuid id PK
+    uuid farmer_id FK
+    string name
+    string district
+    decimal total_land_bigha
+    timestamptz created_at
+  }
+  COWS {
+    uuid id PK
+    uuid farm_id FK
+    string name
+    string breed
+    enum gender
+    int age_months
+    decimal weight_kg
+    decimal price
+    enum status
+    int health_score
+    decimal sale_price
+    date sale_date
+    timestamptz created_at
+  }
+  COW_PHOTOS {
+    uuid id PK
+    uuid cow_id FK
+    text url
+    boolean is_primary
+    int sort_order
+  }
+  VACCINES {
+    uuid id PK
+    uuid cow_id FK
+    string vaccine_name
+    date given_date
+    date due_date
+    enum status
+    string vet_name
+  }
+  MEDICINES {
+    uuid id PK
+    uuid cow_id FK
+    string medicine_name
+    string reason
+    date treatment_date
+    decimal cost
+  }
+  COSTS {
+    uuid id PK
+    uuid cow_id FK
+    enum type
+    decimal amount
+    date cost_date
+    text note
+  }
+  MILK_LOGS {
+    uuid id PK
+    uuid cow_id FK
+    date log_date
+    decimal morning_liters
+    decimal evening_liters
+    decimal total_liters
+    decimal sold_liters
+    decimal price_per_liter
+    decimal income
+  }
+  
+  CONVERSATIONS {
+    uuid id PK
+    uuid buyer_id FK
+    uuid farmer_id FK
+    uuid cow_id FK
+    text last_message
+    timestamptz last_message_at
+  }
+  MESSAGES {
+    uuid id PK
+    uuid conversation_id FK
+    uuid sender_id FK
+    text text
+    boolean is_read
+    timestamptz created_at
+  }
+  ORDERS {
+    uuid id PK
+    uuid buyer_id FK
+    uuid farmer_id FK
+    uuid cow_id FK
+    uuid conversation_id FK
+    decimal total_price
+    decimal advance_amount
+    decimal remaining_amount
+    enum status
+    enum payment_method
+    enum payment_status
+    date preferred_date
+    int rating
+    text comment
+  }
+  NOTIFICATIONS {
+    uuid id PK
+    uuid user_id FK
+    string type
+    string title
+    text body
+    jsonb data
+    boolean is_read
+  }
+
+  USERS ||--o{ FARMS : "owns"
+  USERS ||--o{ ORDERS : "gives"
+
+
+  USERS ||--o{ NOTIFICATIONS : "receives"
+  FARMS ||--o{ COWS : "houses"
+  FARMS ||--o{ ORDERS : "receives"
+
+  COWS ||--o{ COW_PHOTOS : "has"
+  COWS ||--o{ VACCINES : "gets"
+  COWS ||--o{ MEDICINES : "receives"
+  COWS ||--o{ COSTS : "incurs"
+  COWS ||--o{ MILK_LOGS : "produces"
+ 
+  COWS ||--o{ CONVERSATIONS : "about"
+  CONVERSATIONS ||--o{ MESSAGES : "contains"
+`,
+  );
+  document.getElementById("erd").innerHTML = svg;
+
+  document
+    .querySelectorAll("#erd svg.erDiagram text")
+    .forEach((textElement) => {
+      textElement.setAttribute("fill", "#000000");
+      textElement.setAttribute("color", "#000000");
+      textElement.style.fill = "#000000";
+      textElement.style.color = "#000000";
+    });
+
+  document.querySelectorAll("#erd svg.erDiagram .node").forEach((node) => {
+    const firstPath = node.querySelector("path[d]");
+    if (!firstPath) return;
+    const d = firstPath.getAttribute("d");
+    const nums = d.match(/-?[\d.]+/g)?.map(Number);
+    if (!nums || nums.length < 8) return;
+    const xs = [nums[0], nums[2], nums[4], nums[6]];
+    const ys = [nums[1], nums[3], nums[5], nums[7]];
+    const x = Math.min(...xs),
+      y = Math.min(...ys);
+    const w = Math.max(...xs) - x,
+      h = Math.max(...ys) - y;
+    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    rect.setAttribute("x", x);
+    rect.setAttribute("y", y);
+    rect.setAttribute("width", w);
+    rect.setAttribute("height", h);
+    rect.setAttribute("rx", "8");
+    for (const a of ["fill", "stroke", "stroke-width", "class", "style"]) {
+      if (firstPath.hasAttribute(a))
+        rect.setAttribute(a, firstPath.getAttribute(a));
+    }
+    firstPath.replaceWith(rect);
+  });
+  document
+    .querySelectorAll(
+      "#erd svg.erDiagram .row-rect-odd path, #erd svg.erDiagram .row-rect-even path",
+    )
+    .forEach((p) => {
+      p.setAttribute("stroke", "none");
+    });
+</script>

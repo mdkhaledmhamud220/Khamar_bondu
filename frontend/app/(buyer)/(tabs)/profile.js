@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import {
+    ActivityIndicator,
     Alert,
     Image,
     ScrollView,
@@ -10,6 +11,10 @@ import {
     TouchableOpacity,
     View,
 } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { signOut } from "firebase/auth";
+import { auth, db } from "../../../firebaseConfig";
 import {
     BorderRadius,
     Colors,
@@ -17,7 +22,19 @@ import {
     Shadow,
     Spacing,
 } from "../../../constants/theme";
-import { useAuth } from "../../../context/AuthContext";
+
+// ── Normalization helpers ─────────────────────────────────────────────────
+const normalizeUser = (data) => ({
+  id: data.id,
+  firebase_uid: data.firebase_uid,
+  name: data.name || '',
+  email: data.email || '',
+  phone: data.phone || '',
+  role: data.role || 'farmer',
+  profile_photo: data.profile_photo || null,
+  email_verified: data.is_verified !== false,
+  created_at: data.created_at,
+});
 
 function MenuItem({ icon, label, onPress, danger }) {
   return (
@@ -48,13 +65,43 @@ function MenuItem({ icon, label, onPress, danger }) {
 
 export default function BuyerProfileScreen() {
   const router = useRouter();
-  const auth = useAuth() || {};
-  const user = auth.user || {
-    email: "buyer@example.com",
-    emailVerified: false,
-  };
-  const profile = auth.profile || { name: "ক্রেতা", role: "buyer" };
-  const logout = auth.logout || (() => Promise.resolve(true));
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const loadUserData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        Alert.alert('ত্রুটি', 'লগইন করুন');
+        return;
+      }
+
+      // Get user document from Firestore by firebase_uid
+      const usersSnap = await getDocs(
+        query(collection(db, 'users'), where('firebase_uid', '==', currentUser.uid))
+      );
+
+      if (usersSnap.empty) {
+        Alert.alert('ত্রুটি', 'ব্যবহারকারী তথ্য পাওয়া যায়নি');
+        setUser(null);
+        return;
+      }
+
+      const userDoc = usersSnap.docs[0];
+      const userData = normalizeUser({ id: userDoc.id, ...userDoc.data() });
+      setUser(userData);
+    } catch (err) {
+      console.error('Error loading user data:', err);
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadUserData();
+  }, [loadUserData]);
 
   const handleLogout = async () => {
     Alert.alert("লগআউট", "আপনি কি লগআউট করতে চান?", [
@@ -63,17 +110,39 @@ export default function BuyerProfileScreen() {
         text: "লগআউট",
         style: "destructive",
         onPress: async () => {
-          const ok = await logout();
-          if (ok) {
+          try {
+            await signOut(auth);
             router.dismissAll();
-            router.replace("/auth/login");
-          } else {
+            router.replace("./../../");
+          } catch (err) {
+            console.error('Logout error:', err);
             Alert.alert("সমস্যা হয়েছে", "লগআউট করা যায়নি।");
           }
         },
       },
     ]);
   };
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={styles.loadingText}>লোড হচ্ছে...</Text>
+      </View>
+    );
+  }
+
+  if (!user) {
+    return (
+      <View style={styles.center}>
+        <Text style={{ fontSize: 48 }}>😕</Text>
+        <Text style={styles.loadingText}>ব্যবহারকারী তথ্য পাওয়া যায়নি।</Text>
+        <TouchableOpacity style={styles.retryBtn} onPress={loadUserData}>
+          <Text style={styles.retryText}>পুনরায় চেষ্টা করুন</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -85,30 +154,31 @@ export default function BuyerProfileScreen() {
       >
         <View style={styles.circle1} />
         <View style={styles.avatarWrap}>
-          {profile?.profilePhoto ? (
+          {user?.profile_photo ? (
             <Image
-              source={{ uri: profile.profilePhoto }}
+              source={{ uri: user.profile_photo }}
               style={styles.avatar}
             />
           ) : (
             <View style={styles.avatarFallback}>
               <Text style={styles.avatarInitial}>
-                {(profile?.name || "ক")[0].toUpperCase()}
+                {(user?.name || "ক")[0].toUpperCase()}
               </Text>
             </View>
           )}
-          {user?.emailVerified && (
+          {user?.is_verified && (
             <View style={styles.verifiedBadge}>
               <Ionicons name="checkmark" size={12} color={Colors.white} />
             </View>
           )}
         </View>
-        <Text style={styles.name}>{profile?.name || "ক্রেতা"}</Text>
+        <Text style={styles.name}>{user?.name || "ব্যবহারকারী"}</Text>
         <Text style={styles.email}>{user?.email}</Text>
         <View style={styles.roleBadge}>
           <Text style={styles.roleText}>🛒 ক্রেতা</Text>
         </View>
-        {user?.emailVerified && (
+        
+        {user?.is_verified && (
           <View style={styles.verifiedText}>
             <Ionicons
               name="shield-checkmark-outline"
@@ -175,6 +245,21 @@ export default function BuyerProfileScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+  center: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.md,
+    backgroundColor: Colors.background,
+  },
+  loadingText: { fontSize: FontSize.md, color: Colors.textMuted },
+  retryBtn: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.md,
+  },
+  retryText: { color: Colors.white, fontWeight: "700" },
 
   header: {
     paddingTop: 54,

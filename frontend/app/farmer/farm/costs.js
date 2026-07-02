@@ -5,9 +5,42 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-// import api from '../../config/api';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, FontSize, Spacing, BorderRadius, Shadow } from '../../../constants/theme';
+import { addDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { auth, db } from '../../../firebaseConfig';
+
+const toNumber = (value) => Number(value) || 0;
+
+const toDate = (value) => {
+  if (!value) return null;
+  if (value?.toDate) return value.toDate();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const normalizeCow = (doc) => ({
+  id: doc.id,
+  ...doc,
+  farm_id: doc.farm_id ?? doc.farmId ?? null,
+  name: doc.name || '',
+  breed: doc.breed || '',
+  gender: doc.gender || '',
+  age_months: toNumber(doc.age_months ?? doc.ageMonths),
+  weight_kg: toNumber(doc.weight_kg ?? doc.weightKg),
+});
+
+const normalizeCost = (doc, cowName = '') => ({
+  id: doc.id,
+  ...doc,
+  cow_id: doc.cow_id ?? doc.cowId ?? null,
+  cowName,
+  type: doc.type || 'other',
+  amount: toNumber(doc.amount),
+  date: doc.cost_date ?? doc.date ?? null,
+  cost_date: doc.cost_date ?? null,
+  note: doc.note || '',
+});
 
 const today = () => new Date().toISOString().split('T')[0];
 const fmt   = (n) => `৳${(n || 0).toLocaleString('bn-BD')}`;
@@ -43,7 +76,7 @@ function AddCostModal({ visible, cows, onClose, onSaved }) {
   // cows filtered by feed group (only for feed type)
   const filteredCows = type === 'feed' && feedGroup
     ? feedGroup === 'বাছুর'
-      ? cows.filter(c => c.ageMonths <= 12)
+      ? cows.filter(c => c.age_months <= 12)
       : cows.filter(c => {
           const g = FEED_GROUPS.find(fg => fg.key === feedGroup);
           return g ? c.gender === g.gender : true;
@@ -60,7 +93,7 @@ function AddCostModal({ visible, cows, onClose, onSaved }) {
     const g = FEED_GROUPS.find(fg => fg.key === gKey);
     let matching = [];
     if (gKey === 'বাছুর') {
-      matching = cows.filter(c => c.ageMonths <= 12).map(c => c.id);
+      matching = cows.filter(c => c.age_months <= 12).map(c => c.id);
     } else if (g?.gender) {
       matching = cows.filter(c => c.gender === g.gender).map(c => c.id);
     }
@@ -98,17 +131,18 @@ function AddCostModal({ visible, cows, onClose, onSaved }) {
       return Alert.alert('ত্রুটি', 'সঠিক মোট পরিমাণ দিন।');
 
     setLoading(true);
-    const amountEach = parseFloat(amount) / selectedIds.length;
     try {
+      const amountEach = parseFloat(amount) / selectedIds.length;
       await Promise.all(
-        selectedIds.map(id =>
-          api.post(`/farm/costs/${id}`, {
+        selectedIds.map((id) =>
+          addDoc(collection(db, 'costs'), {
+            cow_id: id,
             type,
             amount: parseFloat(amountEach.toFixed(2)),
-            date,
+            cost_date: date,
             note: note || (type === 'feed' ? `খাবার — ${feedGroup} গ্রুপ` : undefined),
-          })
-        )
+          }),
+        ),
       );
       Alert.alert(
         '✅ সফল',
@@ -196,7 +230,7 @@ function AddCostModal({ visible, cows, onClose, onSaved }) {
                     <View style={[styles.groupCount, feedGroup === g.key && { backgroundColor: g.color }]}>
                       <Text style={[styles.groupCountText, feedGroup === g.key && { color: '#fff' }]}>
                         {g.key === 'বাছুর'
-                          ? cows.filter(c => c.ageMonths <= 12).length
+                          ? cows.filter(c => c.age_months <= 12).length
                           : cows.filter(c => c.gender === g.gender).length}
                       </Text>
                     </View>
@@ -256,7 +290,7 @@ function AddCostModal({ visible, cows, onClose, onSaved }) {
                           {c.name || c.breed}
                         </Text>
                         <Text style={styles.cowGridSub} numberOfLines={1}>
-                          {c.ageMonths}মা • {c.weightKg}কেজি
+                          {c.age_months}মা • {c.weight_kg}কেজি
                         </Text>
                         {selected && (
                           <View style={styles.cowGridCheck}>
@@ -360,138 +394,56 @@ export default function AddCostScreen() {
   const [totals,    setTotals]    = useState({});
   const [loading,   setLoading]   = useState(true);
   const [showModal, setShowModal] = useState(false);
-
-  const MOCK_COWS = [
-    {
-      id: 'c1',
-      name: 'রানি',
-      breed: 'দেশি',
-      gender: 'female',
-      ageMonths: 18,
-      weightKg: 320,
-    },
-    {
-      id: 'c2',
-      name: 'মহেশ',
-      breed: 'শাহীওয়াল',
-      gender: 'male',
-      ageMonths: 36,
-      weightKg: 520,
-    },
-    {
-      id: 'c3',
-      name: 'বুলবুল',
-      breed: 'ফ্রিজিয়ান',
-      gender: 'female',
-      ageMonths: 10,
-      weightKg: 180,
-    },
-    {
-      id: 'c4',
-      name: 'কালু',
-      breed: 'দেশি',
-      gender: 'male',
-      ageMonths: 8,
-      weightKg: 150,
-    },
-    {
-      id: 'c5',
-      name: 'সোনালী',
-      breed: 'শাহীওয়াল',
-      gender: 'female',
-      ageMonths: 28,
-      weightKg: 400,
-    },
-  ];
-  const MOCK_COSTS = [
-    {
-      id: '1',
-      type: 'feed',
-      amount: 500,
-      date: '2026-04-10',
-      note: 'গাভীর খাবার',
-      cowName: 'রানি',
-    },
-    {
-      id: '2',
-      type: 'medicine',
-      amount: 1200,
-      date: '2026-04-09',
-      note: 'জ্বরের ওষুধ',
-      cowName: 'মহেশ',
-    },
-    {
-      id: '3',
-      type: 'labor',
-      amount: 800,
-      date: '2026-04-08',
-      note: 'খামারের শ্রমিক',
-      cowName: 'বুলবুল',
-    },
-    {
-      id: '4',
-      type: 'feed',
-      amount: 650,
-      date: '2026-04-07',
-      note: 'বাছুরের খাবার',
-      cowName: 'কালু',
-    },
-    {
-      id: '5',
-      type: 'other',
-      amount: 300,
-      date: '2026-04-06',
-      note: 'ছোট খরচ',
-      cowName: 'সোনালী',
-    },
-  ];
-
-
-  // const loadData = useCallback(async () => {
-  //   try {
-  //     // const cowsRes = await api.get('/cows', { params: { farmerId: 'me' } });
-  //     // const myCows  = cowsRes.data.data || [];
-  //     const myCows = MOCK_COWS || [];
-  //     setCows(myCows);
-
-  //     let allCosts = [];
-  //     for (const cow of myCows.slice(0, 10)) {
-  //       try {
-  //         const r = await api.get(`/farm/costs/${cow.id}`);
-  //         const withCow = (r.data.data || []).map(c => ({ ...c, cowName: cow.name || cow.breed }));
-  //         allCosts = [...allCosts, ...withCow];
-  //       } catch {}
-  //     }
-  //     allCosts.sort((a, b) => b.date.localeCompare(a.date));
-  //     setCosts(MOCK_COSTS);
-
-  //     // totals calculation
-  //     const t = {};
-  //     COST_TYPES.forEach(ct => {
-  //       t[ct.key] = MOCK_COSTS
-  //         .filter(c => c.type === ct.key)
-  //         .reduce((s, c) => s + c.amount, 0);
-  //     });
-
-  //     t.total = MOCK_COSTS.reduce((s, c) => s + c.amount, 0);
-  //     setTotals(t);
-
-  //   } catch (e) {
-  //     console.error(e);
-  //   } finally {
-  //     setLoading(false);
-  //   }
-  // }, []);
+  const { farmId } = useLocalSearchParams();
 
   const loadData = useCallback(async () => {
     try {
-      const myCows = MOCK_COWS;
+      setLoading(true);
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        Alert.alert('ত্রুটি', 'অনুগ্রহ করে আগে লগইন করুন।');
+        setCows([]);
+        setCosts([]);
+        return;
+      }
+
+      const userSnap = await getDocs(
+        query(collection(db, 'users'), where('firebase_uid', '==', currentUser.uid)),
+      );
+      const userDoc = userSnap.docs[0];
+      const userId = userDoc?.id || currentUser.uid;
+      const resolvedFarmId = Array.isArray(farmId) ? farmId[0] : farmId;
+
+      const farmIds = resolvedFarmId
+        ? [String(resolvedFarmId)]
+        : (await getDocs(query(collection(db, 'farms'), where('farmer_id', '==', userId)))).docs.map((doc) => doc.id);
+
+      const cowSnapshots = await Promise.all(
+        farmIds.map((farm) => getDocs(query(collection(db, 'cows'), where('farm_id', '==', farm)))),
+      );
+
+      const myCows = cowSnapshots.flatMap((snapshot) =>
+        snapshot.docs.map((doc) => normalizeCow({ id: doc.id, ...doc.data() })),
+      );
+
       setCows(myCows);
 
-      // 👉 MOCK COST directly use
-      const allCosts = MOCK_COSTS.map(c => ({
-        ...c,
-      }));
+      const costSnapshots = await Promise.all(
+        myCows.map((cow) =>
+          getDocs(query(collection(db, 'costs'), where('cow_id', '==', cow.id))),
+        ),
+      );
+
+      const allCosts = costSnapshots
+        .flatMap((snapshot, index) => {
+          const cow = myCows[index];
+          return snapshot.docs.map((doc) => normalizeCost({ id: doc.id, ...doc.data() }, cow.name || cow.breed));
+        })
+        .sort((a, b) => {
+          const aTime = toDate(a.cost_date)?.getTime() || 0;
+          const bTime = toDate(b.cost_date)?.getTime() || 0;
+          return bTime - aTime;
+        });
 
       setCosts(allCosts);
 
@@ -508,10 +460,11 @@ export default function AddCostScreen() {
       setTotals(t);
     } catch (e) {
       console.error(e);
+      Alert.alert('ত্রুটি', 'খরচের তথ্য লোড করা যায়নি।');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [farmId]);
 
 
   useEffect(() => { loadData(); }, [loadData]);

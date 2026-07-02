@@ -21,6 +21,28 @@ import {
     Spacing,
 } from "../../../constants/theme";
 import { useAuth } from "../../../context/AuthContext";
+import { collection, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
+import { auth, db } from '../../../firebaseConfig';
+
+// Normalize Firestore cow doc to UI shape
+const normalizeCow = (doc) => {
+  const d = doc.data ? doc.data() : doc;
+  return {
+    farm_id: d.farm_id || null,
+    id: doc.id || d.id,
+    name: d.name || d.breed || 'গরু',
+    breed: d.breed || 'অন্যান্য',
+    ageMonths: d.age_months || d.ageMonths || 0,
+    weightKg: d.weight_kg || d.weightKg || 0,
+    district: d.district || d.location || 'অজানা',
+    price: d.sale_price || 0,
+    gender: d.gender || 'female',
+    status: d.status || 'available',
+    healthScore: d.health_score || d.healthScore || 0,
+    healthGrade: d.health_grade || d.healthGrade || '—',
+    photos: d.photos || d.photo_urls || [],
+  };
+};
 
 const BREEDS = [
   "সব",
@@ -226,12 +248,31 @@ export default function BuyerHomeScreen() {
   const fetchCows = useCallback(async () => {
     try {
       setError(null);
+      // small debounce/UX delay
       await new Promise((resolve) => setTimeout(resolve, 200));
-      const data =
-        breed === "সব"
-          ? MOCK_COWS
-          : MOCK_COWS.filter((item) => item.breed === breed);
-      setCows(data);
+      // build query: only available cows, optionally filter by breed
+      const constraints = [where("status", "==", "available")];
+      if (breed && breed !== "সব") constraints.push(where("breed", "==", breed));
+      const q = query(collection(db, "cows"), ...constraints);
+      const snap = await getDocs(q);
+      const cows = snap.docs.map((doc) => normalizeCow(doc));
+      const items = await Promise.all(cows.map(async (cow) => {
+        let district = "অজানা";
+        const farmRef = doc(db, "farms", cow.farm_id);
+      
+        const farmSnap = await getDoc(farmRef);
+        if (cow.farm_id) {
+          if (farmSnap.exists()) {
+            district = farmSnap.data().district || "অজানা";
+          }
+        }
+        return {
+          ...cow,
+          district
+        };
+      }));
+
+      setCows(items);
     } catch (e) {
       setError("গরুর তালিকা লোড করা যায়নি।");
     } finally {

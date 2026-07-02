@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   TextInput, KeyboardAvoidingView, Platform, ActivityIndicator,
@@ -7,10 +7,9 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-// import { useAuth } from '../../context/AuthContext';
-// import { db } from '../../config/firebase';
-// import { collection, query, where, orderBy, onSnapshot, Timestamp } from 'firebase/firestore';
-// import api from '../../config/api';
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db, rtdb } from '../../../firebaseConfig';
+import { ref, onValue, push, set, update, get } from 'firebase/database';
 import { Colors, FontSize, Spacing, BorderRadius, Shadow } from '../../../constants/theme';
 
 function formatTime(isoString) {
@@ -27,6 +26,56 @@ function formatDate(isoString) {
   if (diff === 0) return 'আজ';
   if (diff === 1) return 'গতকাল';
   return d.toLocaleDateString('bn-BD');
+}
+
+function toIsoString(value) {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (value?.toDate) return value.toDate().toISOString();
+  if (value instanceof Date) return value.toISOString();
+  return new Date(value).toISOString();
+}
+
+function normalizeConversation(docOrData) {
+  const data = docOrData?.data ? docOrData.data() : docOrData;
+  if (!data) return null;
+  return {
+    id: docOrData.id || data.id,
+    buyerId: data.buyer_id || data.buyerId || '',
+    farmerId: data.farmer_id || data.farmerId || '',
+    cowId: data.cow_id || data.cowId || '',
+    lastMessage: data.last_message || data.lastMessage || '',
+    lastMessageAt: toIsoString(data.last_message_at || data.lastMessageAt),
+  };
+}
+
+function normalizeMessage(docOrData) {
+  const data = docOrData?.data ? docOrData.data() : docOrData;
+  if (!data) return null;
+  return {
+    id: docOrData.id || data.id,
+    conversationId: data.conversation_id || data.conversationId || '',
+    senderId: data.sender_id || data.senderId || '',
+    text: data.text || '',
+    isRead: Boolean(data.is_read ?? data.isRead),
+    createdAt: toIsoString(data.created_at || data.createdAt),
+  };
+}
+
+function normalizeCow(docOrData) {
+  const data = docOrData?.data ? docOrData.data() : docOrData;
+  if (!data) return null;
+  return {
+    id: docOrData.id || data.id,
+    name: data.name || data.breed || 'গরু',
+    breed: data.breed || 'অন্যান্য',
+    price: data.sale_price || data.price || 0,
+    district: data.district || data.location || 'অজানা',
+    ageMonths: data.age_months || data.ageMonths || 0,
+    weightKg: data.weight_kg || data.weightKg || 0,
+    healthScore: data.health_score || data.healthScore || 0,
+    status: data.status || 'available',
+  };
 }
 
 // ── Message bubble ─────────────────────────────────────────────────────────
@@ -76,14 +125,7 @@ const QUICK_REPLIES = [
 export default function ChatRoomScreen() {
   const router   = useRouter();
   const { convId } = useLocalSearchParams();
-  // const { user, profile } = useAuth();
-  // MOCK USER
-  const user = {
-    uid: "user2",
-  };
-  const profile = {
-    role: "buyer",
-  };
+  const [userId, setUserId] = useState(null);
 
   const [messages,  setMessages]  = useState([]);
   const [text,      setText]      = useState('');
@@ -92,154 +134,78 @@ export default function ChatRoomScreen() {
   const [convInfo,  setConvInfo]  = useState(null);
   const [cowInfo,   setCowInfo]   = useState(null);
   const [showQuick, setShowQuick] = useState(false);
+  const [error, setError] = useState(null);
   const listRef = useRef(null);
-  const mockConvInfo = {
-    id: "1",
-    participants: ["user1", "user2"],
-    cowId: "c2",
-  };
-  const mockCowInfo = {
-    id: "c2",
-    name: "দেশি গরু",
-    breed: "দেশি",
-    price: 85000,
-    district: "রাজশাহী",
-    ageMonths: 24,
-    weightKg: 220,
-    healthScore: 82,
-    status: "available",
-  };
-  const mockMessages = [
-    {
-      id: "m1",
-      conversationId: "1",
-      senderId: "user2",
-      text: "আসসালামু আলাইকুম",
-      createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "m2",
-      conversationId: "1",
-      senderId: "user1",
-      text: "ওয়ালাইকুম আসসালাম",
-      createdAt: new Date(Date.now() - 110 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "m3",
-      conversationId: "1",
-      senderId: "user2",
-      text: "গরুটি কি এখনও আছে?",
-      createdAt: new Date(Date.now() - 90 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "m4",
-      conversationId: "1",
-      senderId: "user1",
-      text: "জি, আছে",
-      createdAt: new Date(Date.now() - 80 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "m5",
-      conversationId: "1",
-      senderId: "user2",
-      text: "দাম একটু কমানো যাবে?",
-      createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "m6",
-      conversationId: "1",
-      senderId: "user1",
-      text: "কত দিতে চান?",
-      createdAt: new Date(Date.now() - 50 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "m7",
-      conversationId: "1",
-      senderId: "user2",
-      text: "৮০ হাজার দিলে নিবো",
-      createdAt: new Date(Date.now() - 40 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "m8",
-      conversationId: "1",
-      senderId: "user1",
-      text: "৮৫ হাজার শেষ",
-      createdAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "m9",
-      conversationId: "1",
-      senderId: "user2",
-      text: "ঠিক আছে, কাল আসবো",
-      createdAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
-    },
-  ];
-
-  // Load conversation info
-  // useEffect(() => {
-  //   if (!convId) return;
-  //   api.get('/chat/conversations/list')
-  //     .then(res => {
-  //       const conv = (res.data.data || []).find(c => c.id === convId);
-  //       if (conv) {
-  //         setConvInfo(conv);
-  //         if (conv.cowId) {
-  //           api.get(`/cows/${conv.cowId}`)
-  //             .then(r => setCowInfo(r.data.data))
-  //             .catch(() => {});
-  //         }
-  //       }
-  //     })
-  //     .catch(() => {});
-  // }, [convId]);
-
-  // // Real-time messages via Firestore listener
-  // useEffect(() => {
-  //   if (!convId || !db) return;
-
-  //   try {
-  //     const q = query(
-  //       collection(db, 'messages'),
-  //       where('conversationId', '==', convId),
-  //       orderBy('createdAt', 'asc')
-  //     );
-
-  //     const unsub = onSnapshot(q, (snap) => {
-  //       const msgs = snap.docs.map(d => d.data());
-  //       setMessages(msgs);
-  //       setLoading(false);
-  //       // Scroll to bottom
-  //       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
-  //     }, (err) => {
-  //       console.warn('Firestore listener error:', err);
-  //       // Fallback to REST API
-  //       api.get(`/chat/${convId}/messages`)
-  //         .then(r => { setMessages(r.data.data || []); setLoading(false); })
-  //         .catch(() => setLoading(false));
-  //     });
-
-  //     return unsub;
-  //   } catch (e) {
-  //     // Firestore not configured — use REST fallback
-  //     api.get(`/chat/${convId}/messages`)
-  //       .then(r => { setMessages(r.data.data || []); setLoading(false); })
-  //       .catch(() => setLoading(false));
-  //   }
-  // }, [convId]);
-
   useEffect(() => {
-    setLoading(true);
+    let unsubMessages = null;
 
-    setTimeout(() => {
-      setConvInfo(mockConvInfo);
-      setCowInfo(mockCowInfo);
-      setMessages(mockMessages);
-      setLoading(false);
+    const loadChat = async () => {
+      try {
+        setLoading(true);
+        setError(null);
 
-      setTimeout(() => {
-        listRef.current?.scrollToEnd({ animated: false });
-      }, 100);
-    }, 500);
+        if (!convId) {
+          setError('কথোপকথন পাওয়া যায়নি।');
+          return;
+        }
+
+        const currentUid = auth.currentUser?.uid;
+        if (!currentUid) {
+          setError('লগইন তথ্য পাওয়া যায়নি।');
+          return;
+        }
+
+        setUserId(currentUid);
+
+        // Load conversation from Realtime Database
+        const convSnap = await get(ref(rtdb, `conversations/${String(convId)}`));
+        const convData = convSnap.val();
+        if (!convData) {
+          setError('কথোপকথন পাওয়া যায়নি।');
+          return;
+        }
+
+        const conv = normalizeConversation({ id: String(convId), ...convData });
+        if (!Array.isArray(convData.participants) || !convData.participants.includes(currentUid)) {
+          setError('এই কথোপকথনে আপনার অ্যাক্সেস নেই।');
+          return;
+        }
+
+        setConvInfo(conv);
+
+        if (conv.cowId) {
+          const cowSnap = await getDoc(doc(db, 'cows', conv.cowId));
+          setCowInfo(cowSnap.exists() ? normalizeCow(cowSnap) : null);
+        } else {
+          setCowInfo(null);
+        }
+
+        // Listen to messages under messages/{convId}
+        const messagesRef = ref(rtdb, `messages/${conv.id}`);
+        const unsubscribe = onValue(messagesRef, (snap) => {
+          const val = snap.val() || {};
+          const arr = Object.entries(val).map(([id, d]) => ({ id, ...d }));
+          arr.sort((a, b) => new Date(a.created_at || a.createdAt) - new Date(b.created_at || b.createdAt));
+          setMessages(arr.map(normalizeMessage).filter(Boolean));
+          setLoading(false);
+          setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 80);
+        }, (err) => {
+          setError('বার্তা লোড করা যায়নি।');
+          setLoading(false);
+        });
+
+        unsubMessages = unsubscribe;
+      } catch (e) {
+        setError('কথোপকথন লোড করা যায়নি।');
+        setLoading(false);
+      }
+    };
+
+    loadChat();
+
+    return () => {
+      if (unsubMessages) unsubMessages();
+    };
   }, [convId]);
 
   // const sendMessage = async (msgText) => {
@@ -273,26 +239,38 @@ export default function ChatRoomScreen() {
 
   const sendMessage = async (msgText) => {
     const t = (msgText || text).trim();
-    if (!t || sending) return;
+    if (!t || sending || !convInfo || !userId) return;
 
     setText('');
     setShowQuick(false);
     setSending(true);
 
-    const newMsg = {
-      id: `m_${Date.now()}`,
-      conversationId: convId,
-      senderId: user.uid,
-      text: t,
-      createdAt: new Date().toISOString(),
-    };
+    try {
+      const now = new Date();
+      // push message to RTDB at messages/{convId}
+      const newRef = push(ref(rtdb, `messages/${convInfo.id}`));
+      await set(newRef, {
+        id: newRef.key,
+        conversation_id: convInfo.id,
+        sender_id: userId,
+        text: t,
+        is_read: false,
+        created_at: now.toISOString(),
+      });
 
-    setMessages(prev => [...prev, newMsg]);
-
-    setTimeout(() => {
+      // update conversation meta
+      await update(ref(rtdb, `conversations/${convInfo.id}`), {
+        last_message: t,
+        last_message_at: now.toISOString(),
+        last_sender: userId,
+      });
+    } catch (e) {
+      console.error('sendMessage error', e);
+      Alert.alert('ত্রুটি', 'বার্তা পাঠানো যায়নি।');
+      setText(t);
+    } finally {
       setSending(false);
-      listRef.current?.scrollToEnd({ animated: true });
-    }, 300);
+    }
   };
 
   // Group messages by date
@@ -326,16 +304,16 @@ export default function ChatRoomScreen() {
             </View>
             <View>
               <Text style={styles.headerName} numberOfLines={1}>
-                {cowInfo ? (cowInfo.name || cowInfo.breed) : 'কথোপকথন'}
+                {cowInfo ? (cowInfo.name || cowInfo.breed) : (convInfo ? 'কথোপকথন' : 'লোড হচ্ছে')}
               </Text>
               <Text style={styles.headerSub}>
-                {cowInfo ? `৳${cowInfo.price?.toLocaleString('bn-BD')} • ${cowInfo.district}` : 'সক্রিয়'}
+                {cowInfo ? `৳${cowInfo.price?.toLocaleString('bn-BD')} • ${cowInfo.district}` : (convInfo?.lastMessage || 'সক্রিয়')}
               </Text>
             </View>
           </View>
 
           {/* Booking button */}
-          {cowInfo && profile?.role === 'buyer' && cowInfo.status === 'available' && (
+          {cowInfo && convInfo?.buyerId === userId && cowInfo.status === 'available' && (
             <TouchableOpacity
               style={styles.bookBtn}
               onPress={() => router.push(`/orders/book?cowId=${cowInfo.id}&convId=${convId}`)}
@@ -371,6 +349,10 @@ export default function ChatRoomScreen() {
         <View style={styles.center}>
           <ActivityIndicator size="large" color={Colors.primary} />
         </View>
+      ) : error ? (
+        <View style={styles.center}>
+          <Text style={styles.errorText}>{error}</Text>
+        </View>
       ) : (
         <FlatList
           ref={listRef}
@@ -383,9 +365,9 @@ export default function ChatRoomScreen() {
             if (item.type === 'date') return <DateSep label={item.label} />;
             return (
               <MessageBubble
-                msg={item}
-                isMe={item.senderId === user?.uid}
-              />
+                  msg={item}
+                  isMe={item.senderId === userId}
+                />
             );
           }}
           ListEmptyComponent={

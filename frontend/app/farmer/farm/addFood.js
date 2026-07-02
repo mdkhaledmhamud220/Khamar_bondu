@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -6,209 +6,226 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-// import { useFarm } from '../../../context/FarmContext';
-// import FooterNavigation from '../FooterNavigation';
+import { useRouter } from 'expo-router';
+import { addDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { auth, db } from '../../../firebaseConfig';
 
 const AddFood = () => {
-//   const { addCost } = useFarm();
-
-  const [selectedGroup, setSelectedGroup] = useState('bachur');
-
+  const router = useRouter();
+  const [cows, setCows] = useState([]);
+  const [selectedCowId, setSelectedCowId] = useState('');
   const [grass, setGrass] = useState('');
   const [bran, setBran] = useState('');
   const [feed, setFeed] = useState('');
-
   const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  // cost per kg
   const grassCost = 2;
   const branCost = 30;
   const feedCost = 40;
 
-  // calculation
   const totalGrass = Number(grass) * grassCost || 0;
   const totalBran = Number(bran) * branCost || 0;
   const totalFeed = Number(feed) * feedCost || 0;
-
   const total = totalGrass + totalBran + totalFeed;
 
-  // 📦 Load history
-  useEffect(() => {
-    loadHistory();
-  }, []);
+  const selectedCow = cows.find((cow) => cow.id === selectedCowId) || null;
 
-  const loadHistory = async () => {
+  const loadData = useCallback(async () => {
     try {
-      const data = await AsyncStorage.getItem('food_history');
-      if (data) setHistory(JSON.parse(data));
+      setLoading(true);
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        Alert.alert('ত্রুটি', 'অনুগ্রহ করে আগে লগইন করুন।');
+        setCows([]);
+        setHistory([]);
+        return;
+      }
+
+      const userSnap = await getDocs(
+        query(collection(db, 'users'), where('firebase_uid', '==', currentUser.uid)),
+      );
+      const userDoc = userSnap.docs[0];
+      const userId = userDoc?.id || currentUser.uid;
+
+      const farmsSnap = await getDocs(
+        query(collection(db, 'farms'), where('farmer_id', '==', userId)),
+      );
+      const farmIds = farmsSnap.docs.map((doc) => doc.id);
+
+      const cowSnapshots = await Promise.all(
+        farmIds.map((farmId) =>
+          getDocs(query(collection(db, 'cows'), where('farm_id', '==', farmId))),
+        ),
+      );
+
+      const cowsList = cowSnapshots.flatMap((snapshot) =>
+        snapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+          age_months: Number(doc.data().age_months ?? doc.data().ageMonths) || 0,
+          weight_kg: Number(doc.data().weight_kg ?? doc.data().weightKg) || 0,
+        })),
+      );
+
+      setCows(cowsList);
+      if (!selectedCowId && cowsList.length > 0) {
+        setSelectedCowId(cowsList[0].id);
+      }
+
+      if (cowsList.length === 0) {
+        setHistory([]);
+        return;
+      }
+
+      const historyCowId = selectedCowId || cowsList[0].id;
+      const historySnap = await getDocs(
+        query(collection(db, 'costs'), where('cow_id', '==', historyCowId), where('type', '==', 'feed')),
+      );
+
+      const loadedHistory = historySnap.docs
+        .map((doc) => ({ id: doc.id, ...doc.data() }))
+        .sort((a, b) => String(b.cost_date || '').localeCompare(String(a.cost_date || '')));
+
+      setHistory(loadedHistory);
     } catch (error) {
       console.log(error);
+      Alert.alert('ত্রুটি', 'খাবারের তথ্য লোড করা যায়নি।');
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedCowId]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  useEffect(() => {
+    setGrass('');
+    setBran('');
+    setFeed('');
+    if (selectedCowId) {
+      loadData();
+    }
+  }, [selectedCowId]);
+
+  const handleSave = async () => {
+    if (!selectedCowId) return Alert.alert('ত্রুটি', 'একটি গরু নির্বাচন করুন।');
+    if (total === 0) return Alert.alert('ত্রুটি', 'খাবারের পরিমাণ দিন।');
+
+    try {
+      setSaving(true);
+      await addDoc(collection(db, 'costs'), {
+        cow_id: selectedCowId,
+        type: 'feed',
+        amount: total,
+        cost_date: new Date().toISOString().split('T')[0],
+        note: `ঘাস ${grass || 0}kg, ভুসি ${bran || 0}kg, দানাদার ${feed || 0}kg`,
+      });
+
+      Alert.alert('✅ সফল', 'খাবারের খরচ সংরক্ষণ হয়েছে।');
+      setGrass('');
+      setBran('');
+      setFeed('');
+      loadData();
+    } catch (error) {
+      console.log(error);
+      Alert.alert('ত্রুটি', 'খাবারের খরচ যোগ করা যায়নি।');
+    } finally {
+      setSaving(false);
     }
   };
 
-  // 💾 Save history
-  useEffect(() => {
-    AsyncStorage.setItem('food_history', JSON.stringify(history));
-  }, [history]);
+  const getTitle = () => 'একক গরুর খাবার';
 
-  // reset form on tab change
-  useEffect(() => {
-    setGrass('');
-    setBran('');
-    setFeed('');
-  }, [selectedGroup]);
-
-  // save
-  const handleSave = () => {
-    if (total === 0) return;
-
-    addCost(total);
-
-    const newItem = {
-      id: Date.now(),
-      group: selectedGroup,
-      grass,
-      bran,
-      feed,
-      total,
-      date: new Date().toLocaleDateString('bn-BD'),
-    };
-
-    setHistory(prev => [newItem, ...prev]);
-
-    setGrass('');
-    setBran('');
-    setFeed('');
-  };
-
-  const getTitle = () => {
-    if (selectedGroup === 'bachur') return 'বাছুরের খাবার';
-    if (selectedGroup === 'gavi') return 'গাভীর খাবার';
-    return 'ষাঁড় গরুর খাবার';
-  };
-
-  const getGroupName = (group) => {
-    if (group === 'bachur') return 'বাছুর';
-    if (group === 'gavi') return 'গাভী';
-    return 'ষাঁড়';
-  };
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.center]}>
+        <ActivityIndicator size="large" color="#2e7d32" />
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header */}
         <View style={styles.header}>
-          <Ionicons name="arrow-back" size={22} color="white" />
+          <TouchableOpacity onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={22} color="white" />
+          </TouchableOpacity>
           <Text style={styles.headerTitle}>{getTitle()}</Text>
         </View>
 
-        {/* 🔥 Tabs */}
-        <View style={styles.tabs}>
-          {[
-            { key: 'bachur', label: 'বাছুর' },
-            { key: 'gavi', label: 'গাভী' },
-            { key: 'shar', label: 'ষাঁড়' },
-          ].map(item => (
-            <TouchableOpacity
-              key={item.key}
-              style={[
-                styles.tab,
-                selectedGroup === item.key && styles.activeTab,
-              ]}
-              onPress={() => setSelectedGroup(item.key)}
-            >
-              <Text
-                style={[
-                  styles.tabText,
-                  selectedGroup === item.key && styles.activeText,
-                ]}
-              >
-                {item.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Form */}
         <View style={styles.form}>
+          <Text style={styles.label}>গরু নির্বাচন করুন *</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cowRow}>
+            {cows.map((cow) => {
+              const selected = selectedCowId === cow.id;
+              return (
+                <TouchableOpacity
+                  key={cow.id}
+                  style={[styles.cowChip, selected && styles.cowChipActive]}
+                  onPress={() => setSelectedCowId(cow.id)}
+                >
+                  <Text style={styles.cowEmoji}>{cow.gender === 'female' ? '🐄' : '🐂'}</Text>
+                  <Text style={[styles.cowName, selected && styles.cowNameActive]}>
+                    {cow.name || cow.breed}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+            {cows.length === 0 && <Text style={styles.emptyText}>আগে গরু যোগ করুন</Text>}
+          </ScrollView>
+
+          {selectedCow && (
+            <View style={styles.selectedCowBox}>
+              <Text style={styles.selectedCowTitle}>{selectedCow.name || selectedCow.breed}</Text>
+              <Text style={styles.selectedCowSub}>
+                {selectedCow.breed} • {selectedCow.age_months} মাস • {selectedCow.weight_kg} কেজি
+              </Text>
+            </View>
+          )}
+
           <Text style={styles.label}>ঘাস (কেজি)</Text>
-          <TextInput
-            style={styles.input}
-            keyboardType="numeric"
-            value={grass}
-            onChangeText={setGrass}
-            placeholder="0"
-          />
+          <TextInput style={styles.input} keyboardType="numeric" value={grass} onChangeText={setGrass} placeholder="0" />
 
           <Text style={styles.label}>ভুসি (কেজি)</Text>
-          <TextInput
-            style={styles.input}
-            keyboardType="numeric"
-            value={bran}
-            onChangeText={setBran}
-            placeholder="0"
-          />
+          <TextInput style={styles.input} keyboardType="numeric" value={bran} onChangeText={setBran} placeholder="0" />
 
           <Text style={styles.label}>দানাদার খাবার (কেজি)</Text>
-          <TextInput
-            style={styles.input}
-            keyboardType="numeric"
-            value={feed}
-            onChangeText={setFeed}
-            placeholder="0"
-          />
+          <TextInput style={styles.input} keyboardType="numeric" value={feed} onChangeText={setFeed} placeholder="0" />
         </View>
 
-        {/* Cost Box */}
         <View style={styles.costBox}>
           <Text style={styles.costTitle}>খরচের হিসাব</Text>
-
-          <View style={styles.row}>
-            <Text>ঘাস</Text>
-            <Text>{totalGrass.toFixed(2)} টাকা</Text>
-          </View>
-
-          <View style={styles.row}>
-            <Text>ভুসি</Text>
-            <Text>{totalBran.toFixed(2)} টাকা</Text>
-          </View>
-
-          <View style={styles.row}>
-            <Text>দানাদার</Text>
-            <Text>{totalFeed.toFixed(2)} টাকা</Text>
-          </View>
-
-          <View style={styles.totalRow}>
-            <Text style={styles.totalText}>মোট খরচ</Text>
-            <Text style={styles.totalText}>{total.toFixed(2)} টাকা</Text>
-          </View>
+          <View style={styles.row}><Text>ঘাস</Text><Text>{totalGrass.toFixed(2)} টাকা</Text></View>
+          <View style={styles.row}><Text>ভুসি</Text><Text>{totalBran.toFixed(2)} টাকা</Text></View>
+          <View style={styles.row}><Text>দানাদার</Text><Text>{totalFeed.toFixed(2)} টাকা</Text></View>
+          <View style={styles.totalRow}><Text style={styles.totalText}>মোট খরচ</Text><Text style={styles.totalText}>{total.toFixed(2)} টাকা</Text></View>
+          <Text style={styles.note}>এই খরচ শুধু নির্বাচিত একক গরুর জন্য সেভ হবে।</Text>
         </View>
 
-        {/* Button */}
-        <TouchableOpacity style={styles.button} onPress={handleSave}>
-          <Text style={styles.buttonText}>সংরক্ষণ করুন</Text>
+        <TouchableOpacity style={styles.button} onPress={handleSave} disabled={saving}>
+          {saving ? <ActivityIndicator color="white" /> : <Text style={styles.buttonText}>সংরক্ষণ করুন</Text>}
         </TouchableOpacity>
 
-        {/* History */}
         <View style={styles.historyBox}>
-          <Text style={styles.costTitle}>খাবারের ইতিহাস</Text>
-
-          {history.map(item => (
+          <Text style={styles.costTitle}>এই গরুর খাবারের ইতিহাস</Text>
+          {history.length === 0 ? (
+            <Text style={styles.historySub}>এখনো কোনো খাবারের খরচ নেই।</Text>
+          ) : history.map((item) => (
             <View key={item.id} style={styles.historyItem}>
-              <Text style={styles.historyText}>
-                {getGroupName(item.group)} - {item.total} টাকা
-              </Text>
-              <Text style={styles.historySub}>{item.date}</Text>
+              <Text style={styles.historyText}>{item.note || 'খাবার'} - {Number(item.amount || 0).toFixed(2)} টাকা</Text>
+              <Text style={styles.historySub}>{item.cost_date}</Text>
             </View>
           ))}
         </View>
       </ScrollView>
-
-      {/* ✅ Footer */}
-      {/* <FooterNavigation /> */}
     </View>
   );
 };
@@ -219,7 +236,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-    paddingBottom: 70, // ✅ footer fix
+    paddingBottom: 70,
+  },
+
+  center: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   header: {
@@ -227,6 +249,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: 15,
+    gap: 10,
   },
 
   headerTitle: {
@@ -241,6 +264,55 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginVertical: 20,
     paddingHorizontal: 10,
+  },
+
+  cowRow: {
+    marginBottom: 10,
+  },
+
+  cowChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 24,
+    backgroundColor: '#e5e7eb',
+    marginRight: 8,
+  },
+
+  cowChipActive: {
+    backgroundColor: '#2e7d32',
+  },
+
+  cowEmoji: {
+    marginRight: 6,
+  },
+
+  cowName: {
+    color: '#333',
+    fontWeight: '600',
+  },
+
+  cowNameActive: {
+    color: '#fff',
+  },
+
+  selectedCowBox: {
+    backgroundColor: '#e8f5e9',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+
+  selectedCowTitle: {
+    fontWeight: 'bold',
+    color: '#1b5e20',
+  },
+
+  selectedCowSub: {
+    color: '#2e7d32',
+    marginTop: 2,
+    fontSize: 12,
   },
 
   tab: {
@@ -344,6 +416,12 @@ const styles = StyleSheet.create({
 
   historySub: {
     color: '#666',
+    fontSize: 12,
+  },
+
+  note: {
+    marginTop: 8,
+    color: '#2e7d32',
     fontSize: 12,
   },
 });

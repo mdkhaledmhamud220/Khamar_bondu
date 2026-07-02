@@ -5,16 +5,51 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-// import api from '../../config/api';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, FontSize, Spacing, BorderRadius, Shadow } from '../../../constants/theme';
+import { collection, getDocs, query, where, addDoc } from 'firebase/firestore';
+import { auth, db } from '../../../firebaseConfig'; 
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 const today = () => new Date().toISOString().split('T')[0];
-const fmt   = (n) => `৳${(n || 0).toLocaleString('bn-BD')}`;
+const fmt   = (n) => `৳ ${(n || 0).toLocaleString('bn-BD')}`;
 const fmtL  = (n) => `${(n || 0).toFixed(1)} লি.`;
+const toNumber = (value) => Number(value) || 0;
+const toDate = (value) => {
+  if (!value) return null;
+  if (value?.toDate) return value.toDate();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
 
-// ── Add Log Modal ──────────────────────────────────────────────────────────
+const normalizeCow = (doc) => ({
+  id: doc.id,
+  ...doc,
+  farm_id: doc.farm_id ?? doc.farmId ?? null,
+  name: doc.name || '',
+  breed: doc.breed || '',
+  weight_kg: toNumber(doc.weight_kg ?? doc.weightKg),
+  health_score: toNumber(doc.health_score ?? doc.healthScore),
+});
+
+const normalizeMilkLog = (doc, cowName = '') => ({
+  id: doc.id,
+  ...doc,
+  cow_id: doc.cow_id ?? doc.cowId ?? null,
+  cowName,
+  date: doc.log_date ?? doc.date ?? null,
+  log_date: doc.log_date ?? null,
+  morning_liters: toNumber(doc.morning_liters ?? doc.morningLiters),
+  evening_liters: toNumber(doc.evening_liters ?? doc.eveningLiters),
+  total_liters: toNumber(doc.total_liters ?? doc.totalLiters),
+  sold_liters: toNumber(doc.sold_liters ?? doc.soldLiters),
+  price_per_liter: toNumber(doc.price_per_liter ?? doc.pricePerLiter),
+  income: toNumber(doc.income),
+});
+
+// =====================================
+// Add Log Modal (দুধের লগ যোগ করার মডাল)
+// =====================================
 function AddLogModal({ visible, cows, onClose, onSaved }) {
   const [cowId,        setCowId]        = useState('');
   const [date,         setDate]         = useState(today());
@@ -22,9 +57,7 @@ function AddLogModal({ visible, cows, onClose, onSaved }) {
   const [evening,      setEvening]      = useState('');
   const [price,        setPrice]        = useState('60');
   const [sold,         setSold]         = useState('');
-  const [note,         setNote]         = useState('');
   const [loading,      setLoading]      = useState(false);
-  const [step,         setStep]         = useState(1); // 1: cow select, 2: data entry
 
   const totalLiters = (parseFloat(morning) || 0) + (parseFloat(evening) || 0);
   const soldLiters  = parseFloat(sold) || totalLiters;
@@ -32,32 +65,8 @@ function AddLogModal({ visible, cows, onClose, onSaved }) {
 
   const reset = () => {
     setCowId(''); setDate(today()); setMorning(''); setEvening('');
-    setPrice('60'); setSold(''); setNote(''); setStep(1);
+    setPrice('60'); setSold('');
   };
-
-  // const handleSave = async () => {
-  //   if (!cowId)    return Alert.alert('ত্রুটি', 'গরু নির্বাচন করুন।');
-  //   if (!morning)  return Alert.alert('ত্রুটি', 'সকালের দুধের পরিমাণ দিন।');
-  //   setLoading(true);
-  //   try {
-  //     await api.post('/farm/milk', {
-  //       cowId, date,
-  //       morningLiters: parseFloat(morning),
-  //       eveningLiters: parseFloat(evening || 0),
-  //       pricePerLiter: parseFloat(price),
-  //       soldLiters: parseFloat(sold || totalLiters),
-  //       note,
-  //     });
-  //     Alert.alert('✅ সফল', 'দুধের লগ যোগ হয়েছে।');
-  //     reset();
-  //     onSaved();
-  //     onClose();
-  //   } catch (e) {
-  //     Alert.alert('ত্রুটি', e.userMessage || 'লগ যোগ করা যায়নি।');
-  //   } finally {
-  //     setLoading(false);
-  //   }
-  // };
 
   const handleSave = async () => {
     if (!cowId) return Alert.alert('ত্রুটি', 'গরু নির্বাচন করুন।');
@@ -69,9 +78,24 @@ function AddLogModal({ visible, cows, onClose, onSaved }) {
       const total = (parseFloat(morning) || 0) + (parseFloat(evening) || 0);
       const soldL = parseFloat(sold) || total;
       const priceL = parseFloat(price) || 60;
+      const calcIncome = soldL * priceL;
 
+      // ২. স্কিমা অনুযায়ী ফায়ারস্টোরের root milk_logs কালেকশনে ডাটা সেভ করুন
+      const milkLogsCollection = collection(db, 'milk_logs');
+      const docRef = await addDoc(milkLogsCollection, {
+        cow_id: cowId,
+        log_date: date,
+        morning_liters: parseFloat(morning),
+        evening_liters: parseFloat(evening || 0),
+        total_liters: total,
+        sold_liters: soldL,
+        price_per_liter: priceL,
+        income: calcIncome,
+      });
+
+      // ৩. প্যারেন্ট স্ক্রিন আপডেট করার জন্য ডাটা অবজেক্ট তৈরি
       const newLog = {
-        id: Date.now().toString(),
+        id: docRef.id,
         cowId,
         cowName: cows.find(c => c.id === cowId)?.name || '',
         date,
@@ -80,17 +104,16 @@ function AddLogModal({ visible, cows, onClose, onSaved }) {
         totalLiters: total,
         soldLiters: soldL,
         pricePerLiter: priceL,
-        income: soldL * priceL,
-        note,
+        income: calcIncome,
       };
 
-      onSaved(newLog); // 🔥 parent এ পাঠাচ্ছি
+      onSaved(newLog); // Parent স্ক্রিনে পাঠানো হচ্ছে
 
       Alert.alert('✅ সফল', 'দুধের লগ যোগ হয়েছে।');
-
       reset();
       onClose();
     } catch (e) {
+      console.log(e);
       Alert.alert('ত্রুটি', 'লগ যোগ করা যায়নি।');
     } finally {
       setLoading(false);
@@ -115,17 +138,25 @@ function AddLogModal({ visible, cows, onClose, onSaved }) {
         </View>
 
         <ScrollView style={styles.modalScroll} keyboardShouldPersistTaps="handled">
-          {/* Cow selector */}
           <Text style={styles.fieldLabel}>গরু নির্বাচন করুন *</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.cowScroll}>
-            {cows.map(c => (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.cowScroll}
+          >
+            {cows.map((c) => (
               <TouchableOpacity
                 key={c.id}
                 style={[styles.cowChip, cowId === c.id && styles.cowChipActive]}
                 onPress={() => setCowId(c.id)}
               >
                 <Text style={styles.cowChipEmoji}>🐄</Text>
-                <Text style={[styles.cowChipText, cowId === c.id && styles.cowChipTextActive]}>
+                <Text
+                  style={[
+                    styles.cowChipText,
+                    cowId === c.id && styles.cowChipTextActive,
+                  ]}
+                >
                   {c.name || c.breed}
                 </Text>
               </TouchableOpacity>
@@ -135,10 +166,13 @@ function AddLogModal({ visible, cows, onClose, onSaved }) {
             )}
           </ScrollView>
 
-          {/* Date */}
           <Text style={styles.fieldLabel}>তারিখ</Text>
           <View style={styles.inputRow}>
-            <Ionicons name="calendar-outline" size={18} color={Colors.primary} />
+            <Ionicons
+              name="calendar-outline"
+              size={18}
+              color={Colors.primary}
+            />
             <TextInput
               style={styles.input}
               value={date}
@@ -147,37 +181,58 @@ function AddLogModal({ visible, cows, onClose, onSaved }) {
             />
           </View>
 
-          {/* Morning / Evening */}
           <View style={styles.row}>
             <View style={styles.half}>
               <Text style={styles.fieldLabel}>🌅 সকাল (লিটার) *</Text>
               <View style={styles.inputRow}>
-                <TextInput style={styles.input} value={morning} onChangeText={setMorning} placeholder="0.0" keyboardType="numeric" />
+                <TextInput
+                  style={styles.input}
+                  value={morning}
+                  onChangeText={setMorning}
+                  placeholder="0.0"
+                  keyboardType="numeric"
+                />
               </View>
             </View>
             <View style={styles.half}>
               <Text style={styles.fieldLabel}>🌙 বিকাল (লিটার)</Text>
               <View style={styles.inputRow}>
-                <TextInput style={styles.input} value={evening} onChangeText={setEvening} placeholder="0.0" keyboardType="numeric" />
+                <TextInput
+                  style={styles.input}
+                  value={evening}
+                  onChangeText={setEvening}
+                  placeholder="0.0"
+                  keyboardType="numeric"
+                />
               </View>
             </View>
           </View>
 
-          {/* Price per liter */}
           <Text style={styles.fieldLabel}>প্রতি লিটার দাম (৳)</Text>
           <View style={styles.inputRow}>
             <Ionicons name="cash-outline" size={18} color={Colors.primary} />
-            <TextInput style={styles.input} value={price} onChangeText={setPrice} keyboardType="numeric" />
+            <TextInput
+              style={styles.input}
+              value={price}
+              onChangeText={setPrice}
+              keyboardType="numeric"
+            />
           </View>
 
-          {/* Sold liters */}
-          <Text style={styles.fieldLabel}>বিক্রি করা পরিমাণ (লিটার) — খালি রাখলে সব বিক্রি ধরবে</Text>
+          <Text style={styles.fieldLabel}>
+            বিক্রি করা পরিমাণ (লিটার) — খালি রাখলে সব বিক্রি ধরবে
+          </Text>
           <View style={styles.inputRow}>
             <Ionicons name="water-outline" size={18} color={Colors.primary} />
-            <TextInput style={styles.input} value={sold} onChangeText={setSold} placeholder={`${totalLiters.toFixed(1)}`} keyboardType="numeric" />
+            <TextInput
+              style={styles.input}
+              value={sold}
+              onChangeText={setSold}
+              placeholder={`${totalLiters.toFixed(1)}`}
+              keyboardType="numeric"
+            />
           </View>
 
-          {/* Income preview */}
           {totalLiters > 0 && (
             <View style={styles.previewBox}>
               <View style={styles.previewRow}>
@@ -194,17 +249,6 @@ function AddLogModal({ visible, cows, onClose, onSaved }) {
               </View>
             </View>
           )}
-
-          {/* Note */}
-          <Text style={styles.fieldLabel}>নোট (ঐচ্ছিক)</Text>
-          <TextInput
-            style={[styles.inputRow, styles.textarea]}
-            value={note}
-            onChangeText={setNote}
-            placeholder="যেকোনো মন্তব্য..."
-            multiline
-            numberOfLines={3}
-          />
         </ScrollView>
       </View>
     </Modal>
@@ -243,89 +287,101 @@ function LogCard({ log, cowName }) {
 // ── Main Screen ────────────────────────────────────────────────────────────
 export default function MilkLogScreen() {
   const router = useRouter();
+  const { farmId } = useLocalSearchParams();
   const [logs,      setLogs]      = useState([]);
   const [cows,      setCows]      = useState([]);
   const [summary,   setSummary]   = useState({ totalLiters: 0, totalIncome: 0 });
   const [loading,   setLoading]   = useState(true);
   const [showModal, setShowModal] = useState(false);
-  //mock data
-  const MOCK_COWS = [
-    { id: 'c1', name: 'রানি', breed: 'দেশি' },
-    { id: 'c2', name: 'মহেশ', breed: 'শাহীওয়াল' },
-  ];
-
-  const MOCK_LOGS = [
-    {
-      id: '1',
-      cowId: 'c1',
-      cowName: 'রানি',
-      date: '2026-04-10',
-      morningLiters: 3,
-      eveningLiters: 2,
-      totalLiters: 5,
-      soldLiters: 5,
-      pricePerLiter: 60,
-      income: 300,
-    },
-    {
-      id: '2',
-      cowId: 'c2',
-      cowName: 'মহেশ',
-      date: '2026-04-09',
-      morningLiters: 4,
-      eveningLiters: 3,
-      totalLiters: 7,
-      soldLiters: 6,
-      pricePerLiter: 65,
-      income: 390,
-    },
-  ];
-
-  // const loadData = useCallback(async () => {
-  //   try {
-  //     const [cowsRes] = await Promise.all([
-  //       api.get('/cows', { params: { farmerId: 'me' } }),
-  //     ]);
-  //     const myCows = cowsRes.data.data || [];
-  //     setCows(myCows);
-
-  //     // Fetch milk logs for all cows
-  //     let allLogs = [];
-  //     for (const cow of myCows.slice(0, 5)) {
-  //       try {
-  //         const r = await api.get(`/farm/milk/${cow.id}`);
-  //         const logsWithCow = (r.data.data || []).map(l => ({ ...l, cowName: cow.name || cow.breed }));
-  //         allLogs = [...allLogs, ...logsWithCow];
-  //       } catch {}
-  //     }
-  //     allLogs.sort((a, b) => b.date.localeCompare(a.date));
-  //     setLogs(allLogs);
-
-  //     const totalLiters = allLogs.reduce((s, l) => s + (l.totalLiters || 0), 0);
-  //     const totalIncome = allLogs.reduce((s, l) => s + (l.income || 0), 0);
-  //     setSummary({ totalLiters, totalIncome });
-  //   } catch (e) {
-  //     console.error(e);
-  //   } finally {
-  //     setLoading(false);
-  //   }
-  // }, []);
+  const resolvedFarmId = Array.isArray(farmId) ? farmId[0] : farmId;
 
   const loadData = useCallback(async () => {
+    setLoading(true);
     try {
-      setCows(MOCK_COWS);
-      setLogs(MOCK_LOGS);
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        setErrorAndStop("অনুগ্রহ করে আগে লগইন করুন।");
+        return;
+      }
 
-      const totalLiters = MOCK_LOGS.reduce((s, l) => s + l.totalLiters, 0);
-      const totalIncome = MOCK_LOGS.reduce((s, l) => s + l.income, 0);
+      const usersSnap = await getDocs(
+        query(collection(db, 'users'), where('firebase_uid', '==', currentUser.uid)),
+      );
+
+      const userDoc = usersSnap.docs[0];
+      const userId = userDoc?.id || currentUser.uid;
+
+      const farmSnapshots = resolvedFarmId
+        ? []
+        : await getDocs(
+            query(collection(db, 'farms'), where('farmer_id', '==', userId)),
+          );
+
+      const farmIds = resolvedFarmId
+        ? [String(resolvedFarmId)]
+        : farmSnapshots.docs.map((doc) => doc.id);
+
+      if (farmIds.length === 0) {
+        setCows([]);
+        setLogs([]);
+        setSummary({ totalLiters: 0, totalIncome: 0 });
+        return;
+      }
+
+      const cowSnapshots = await Promise.all(
+        farmIds.map((farm) =>
+          getDocs(query(collection(db, 'cows'), where('farm_id', '==', farm))),
+        ),
+      );
+
+      const cowsList = cowSnapshots.flatMap((snapshot) =>
+        snapshot.docs.map((doc) => normalizeCow({ id: doc.id, ...doc.data() })),
+      );
+
+      setCows(cowsList);
+
+      const logSnapshots = await Promise.all(
+        cowsList.map(async (cow) => {
+          const cowLogsSnap = await getDocs(
+            query(collection(db, 'milk_logs'), where('cow_id', '==', cow.id)),
+          );
+
+          return cowLogsSnap.docs.map((doc) =>
+            normalizeMilkLog({ id: doc.id, ...doc.data() }, cow.name || cow.breed),
+          );
+        }),
+      );
+
+      const allLogs = logSnapshots
+        .flat()
+        .sort((a, b) => {
+          const aTime = toDate(a.log_date)?.getTime() || 0;
+          const bTime = toDate(b.log_date)?.getTime() || 0;
+          return bTime - aTime;
+        });
+
+      setLogs(allLogs);
+
+      const totalLiters = allLogs.reduce((sum, log) => sum + (log.total_liters || 0), 0);
+      const totalIncome = allLogs.reduce((sum, log) => sum + (log.income || 0), 0);
 
       setSummary({ totalLiters, totalIncome });
     } catch (e) {
       console.error(e);
+      Alert.alert('ত্রুটি', 'দুধের লগ লোড করা যায়নি।');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [resolvedFarmId]);
+
+  const setErrorAndStop = (message) => {
+    Alert.alert('ত্রুটি', message);
+    setLogs([]);
+    setCows([]);
+    setSummary({ totalLiters: 0, totalIncome: 0 });
+    setLoading(false);
+  };
+
   useEffect(() => { loadData(); }, [loadData]);
 
 
@@ -395,9 +451,9 @@ export default function MilkLogScreen() {
         cows={cows}
         onClose={() => setShowModal(false)}
         onSaved={(newLog) => {
-          setLogs(prev => [newLog, ...prev]);
+          setLogs((prev) => [newLog, ...prev]);
 
-          setSummary(prev => ({
+          setSummary((prev) => ({
             totalLiters: prev.totalLiters + newLog.totalLiters,
             totalIncome: prev.totalIncome + newLog.income,
           }));

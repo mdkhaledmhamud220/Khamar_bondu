@@ -17,8 +17,11 @@ import {
     Shadow,
     Spacing,
 } from "../../../constants/theme";
+import { doc, getDoc } from 'firebase/firestore';
+import { auth, db, rtdb } from '../../../firebaseConfig';
+import { ref, push, set } from 'firebase/database';
 
-// Mock data - same as home.js
+// (Legacy) Mock data - kept for reference; real data now loads from Firestore
 const MOCK_COWS = [
   {
     id: "c1",
@@ -37,8 +40,8 @@ const MOCK_COWS = [
       "একটি স্বাস্থ্যকর এবং উৎপাদনশীল দেশী গরু। দুধ উৎপাদন খুবই ভালো।",
     vaccination: "সম্পূর্ণ",
     lastHealthCheck: "2026-03-15",
-    sellerName: "কৃষক রহিম",
-    sellerPhone: "01700000001",
+    _farmerName: "কৃষক রহিম",
+    _farmerPhone: "01700000001",
   },
   {
     id: "c2",
@@ -56,8 +59,8 @@ const MOCK_COWS = [
     description: "খুবই শক্তিশালী ষাঁড়। চাষাবাদের কাজে অত্যন্ত উপযুক্ত।",
     vaccination: "সম্পূর্ণ",
     lastHealthCheck: "2026-03-20",
-    sellerName: "কৃষক করিম",
-    sellerPhone: "01700000002",
+    _farmerName: "কৃষক করিম",
+    _farmerPhone: "01700000002",
   },
   {
     id: "c3",
@@ -75,8 +78,8 @@ const MOCK_COWS = [
     description: "বিদেশী জাতের উন্নত মানের গরু। উচ্চ দুধ উৎপাদনশীল।",
     vaccination: "আংশিক",
     lastHealthCheck: "2026-03-10",
-    sellerName: "কৃষক হাসান",
-    sellerPhone: "01700000003",
+    _farmerName: "কৃষক হাসান",
+    _farmerPhone: "01700000003",
   },
   {
     id: "c4",
@@ -94,8 +97,8 @@ const MOCK_COWS = [
     description: "বড় আকারের গোমাংস উৎপাদনের জন্য আদর্শ।",
     vaccination: "সম্পূর্ণ",
     lastHealthCheck: "2026-03-08",
-    sellerName: "কৃষক আবু",
-    sellerPhone: "01700000004",
+    _farmerName: "কৃষক আবু",
+    _farmerPhone: "01700000004",
   },
   {
     id: "c5",
@@ -113,10 +116,45 @@ const MOCK_COWS = [
     description: "মাঝারি আকারের দুধ উৎপাদনকারী গরু।",
     vaccination: "চলমান",
     lastHealthCheck: "2026-02-28",
-    sellerName: "কৃষক ফারিদ",
-    sellerPhone: "01700000005",
+    _farmerName: "কৃষক ফারিদ",
+    _farmerPhone: "01700000005",
   },
 ];
+
+// Normalize Firestore cow doc to UI shape
+const normalizeCow = (docOrData) => {
+  const d = docOrData && docOrData.data ? docOrData.data() : docOrData;
+  if (!d) return null;
+  return {
+    id: docOrData.id || d.id,
+    farm_id: d.farm_id,
+    farmer_id : d.farmer_id,
+    name: d.name || d.breed || 'গরু',
+    breed: d.breed || 'অন্যান্য',
+    ageMonths: d.age_months || d.ageMonths || 0,
+    weightKg: d.weight_kg || d.weightKg || 0,
+    price: d.sale_price || 0,
+    gender: d.gender || 'female',
+    status: d.status || 'available',
+    healthScore: d.health_score || 0,
+    description: d.description || d.desc || '',
+    // //
+    photos: d.photos || d.photo_urls || [],
+    healthGrade: d.health_grade || d.healthGrade || '—',
+    vaccination: d.vaccination || d.vaccines || d.vaccinated || 'অজানা',
+    lastHealthCheck: d.last_health_check || d.lastHealthCheck || '',
+  };
+};
+
+// Normalize Firestore farmer doc to UI shape
+const normalizeFarmer = (docOrData) => {
+  const d = docOrData && docOrData.data ? docOrData.data() : docOrData;
+  if (!d) return null;
+  return {
+    sellerName: d.name || '',
+    sellerPhone: d.phone || d.phone_number || '',
+  };
+};
 
 function DetailRow({ icon, label, value }) {
   return (
@@ -139,20 +177,61 @@ export default function CowDetailsScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  const createConversation = async (farmerUid, cowId) => {
+    const buyerUid = auth.currentUser?.uid;
+    if (!buyerUid || !farmerUid || !cowId) {
+      throw new Error('conversation data missing');
+    }
+
+    const convRef = push(ref(rtdb, 'conversations'));
+    await set(convRef, {
+      participants: [buyerUid, farmerUid],
+      cowId,
+      last_message: '',
+      last_sender: '',
+      updated_at: new Date().toISOString(),
+    });
+    return convRef.key;
+  };
+
   useEffect(() => {
     const loadCow = async () => {
       try {
         setError(null);
-        // Simulate API call
-        await new Promise((resolve) => setTimeout(resolve, 300));
-
-        // Find cow from mock data
-        const foundCow = MOCK_COWS.find((c) => c.id === id);
-        if (foundCow) {
-          setCow(foundCow);
-        } else {
-          setError("গরু তথ্য পাওয়া যায়নি।");
+        // Load cow document from Firestore by document id
+        if (!id) {
+          setError("অচিহ্নিত গরু আইডি।");
+          return;
         }
+        const ref = doc(db, "cows", id);
+        const snap = await getDoc(ref);
+        if (!snap.exists()) {
+          setError("গরু তথ্য পাওয়া যায়নি।");
+          return;
+        }
+        const normalized = normalizeCow(snap);
+        const farmer_id = normalized.farmer_id;
+        
+        // Load farmer info if farmer_id exists
+        let farmerData = { sellerName: '', sellerPhone: '', district: ''};
+        if (farmer_id) {
+          const ref_farmer = doc(db, "users", farmer_id);
+          const snap_farmer = await getDoc(ref_farmer);
+          if (snap_farmer.exists()) {
+            farmerData = normalizeFarmer(snap_farmer);
+          }
+        }
+        if(normalized.farm_id){
+          const ref_farm = doc(db, "farms", normalized.farm_id);
+          const snap_farm = await getDoc(ref_farm);
+          farmerData.district = snap_farm.data().district;
+        }
+        
+        // Merge cow data with farmer data
+        setCow({
+          ...normalized,
+          ...farmerData
+        });
       } catch (e) {
         setError("তথ্য লোড করতে সমস্যা হয়েছে।");
       } finally {
@@ -312,7 +391,16 @@ export default function CowDetailsScreen() {
             />
             <View style={styles.divider} />
             <DetailRow
-              icon="calendar-outline"
+                  onPress={async () => {
+                    try {
+                      const farmerUid = cow.farmer_id || cow.farmerId;
+                      const convId = await createConversation(farmerUid, cow.id);
+                      router.push(`./../chat/${convId}`);
+                    } catch (e) {
+                      console.error('createConversation error', e);
+                      setError('কথোপকথন শুরু করা যায়নি।');
+                    }
+                  }}
               label="বয়স"
               value={`${cow.ageMonths} মাস`}
             />
@@ -349,7 +437,7 @@ export default function CowDetailsScreen() {
           </View>
         </View>
 
-        {/* Seller Section */}
+        {/* _farmer Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>বিক্রেতার তথ্য</Text>
           <View style={styles.card}>
@@ -373,7 +461,15 @@ export default function CowDetailsScreen() {
         {cow.status === "available" && (
           <View style={styles.actionSection}>
             <TouchableOpacity style={styles.contactBtn}
-              onPress={() => router.push(`./../chat/${cow.id}`)}
+              onPress={async () => {
+                try {
+                  const convId = await createConversation(cow.farmer_id || cow.farmerId, cow.id);
+                  router.push(`./../chat/${convId}`);
+                } catch (e) {
+                  console.error('createConversation error', e);
+                  setError('কথোপকথন শুরু করা যায়নি।');
+                }
+              }}
             >
               <Ionicons name="call" size={18} color={Colors.white} />
               <Text style={styles.contactBtnText}>যোগাযোগ করুন</Text>

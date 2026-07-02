@@ -14,8 +14,8 @@ import {
   TouchableOpacity,
   View
 } from "react-native";
-// import { useAuth } from '../../context/AuthContext';
-// import api from '../../config/api';
+import { collection, getDocs, query, where, doc, getDoc, updateDoc } from "firebase/firestore";
+import { auth, db } from "../../../firebaseConfig";
 import {
   BorderRadius,
   Colors,
@@ -26,55 +26,76 @@ import {
 
 const { width: SW } = Dimensions.get("window");
 
-// ── Mock data (backend connect না হওয়া পর্যন্ত) ──────────────────────────
-const MOCK_COW = {
-  id: "mock-1",
-  name: "রাজা",
-  breed: "শাহীওয়াল",
-  gender: "male",
-  ageMonths: 36,
-  weightKg: 280,
-  price: 120000,
-  district: "রাজশাহী",
-  upazila: "গোদাগাড়ী",
-  description:
-    "সম্পূর্ণ সুস্থ ও সক্রিয় শাহীওয়াল ষাঁড়। সব টিকা সময়মতো দেওয়া হয়েছে। কোরবানির জন্য উপযুক্ত।",
-  status: "available",
-  isForSale: true,
-  healthScore: 88,
-  healthGrade: "অসাধারণ",
-  healthDetails: {
-    vaccination: 30,
-    medicine: 22,
-    weight: 20,
-    age: 10,
-    feeding: 10,
-    expectedWeightKg: 265,
-  },
-  regularFeeding: true,
-  purchaseCost: 60000,
-  feedCost: 18000,
-  medicineCost: 3500,
-  otherCost: 2000,
-  laborCost: 6000,
-  vaccines: [
-    { name: "FMD (ক্ষুরারোগ)", givenDate: "2025-10-15", dueDate: "2026-04-15" },
-    { name: "HS (গলাফুলা)", givenDate: "2025-11-01", dueDate: "2026-05-01" },
-    { name: "BQ (বাদলা)", givenDate: null, dueDate: "2026-05-15" },
-  ],
-  medicines: [{ date: "2025-12-10", reason: "সামান্য জ্বর", cost: 800 }],
-  milkLogs: [
-    { date: "৫ এপ্রিল", morning: 9.5, evening: 8.0, income: 1137 },
-    { date: "৪ এপ্রিল", morning: 8.5, evening: 7.0, income: 1007 },
-    { date: "৩ এপ্রিল", morning: 9.0, evening: 7.5, income: 1072 },
-  ],
-  weightLogs: [
-    { date: "১ মার্চ ২০২৬", weight: 280 },
-    { date: "১ ফেব্রুয়ারি ২০২৬", weight: 272 },
-    { date: "১ জানুয়ারি ২০২৬", weight: 265 },
-  ],
-  createdAt: "2023-04-01",
+// ── Normalization helpers ─────────────────────────────────────────────────
+const toNumber = (val) => {
+  const n = parseFloat(val);
+  return isNaN(n) ? 0 : n;
 };
+
+const toDate = (val) => {
+  if (!val) return null;
+  if (typeof val === 'string') return val;
+  if (val.toDate) return val.toDate().toISOString().split('T')[0];
+  return null;
+};
+
+const normalizeCow = (data) => ({
+  id: data.id,
+  name: data.name || data.breed,
+  breed: data.breed,
+  gender: data.gender,
+  age_months: toNumber(data.age_months || data.ageMonths),
+  weight_kg: toNumber(data.weight_kg || data.weightKg),
+  health_score: toNumber(data.health_score || data.healthScore || 0),
+  status: data.status,
+  is_for_sale: data.is_for_sale !== false,
+  price: toNumber(data.price || 0),
+  sale_price: toNumber(data.sale_price || 0),
+  district: data.district,
+  upazila: data.upazila,
+  description: data.description || '',
+  created_at: toDate(data.created_at || data.createdAt) || new Date().toISOString(),
+});
+
+const normalizeVaccine = (data) => ({
+  id: data.id,
+  cow_id: data.cow_id,
+  vaccine_name: data.vaccine_name,
+  given_date: toDate(data.given_date),
+  due_date: toDate(data.due_date),
+  status: data.status || 'pending',
+  vet_name: data.vet_name || '',
+});
+
+const normalizeMedicine = (data) => ({
+  id: data.id,
+  cow_id: data.cow_id,
+  medicine_name: data.medicine_name,
+  reason: data.reason || '',
+  treatment_date: toDate(data.treatment_date),
+  cost: toNumber(data.cost || 0),
+});
+
+const normalizeCost = (data) => ({
+  id: data.id,
+  cow_id: data.cow_id,
+  type: data.type,
+  amount: toNumber(data.amount),
+  cost_date: toDate(data.cost_date),
+  note: data.note || '',
+});
+
+const normalizeMilkLog = (data) => ({
+  id: data.id,
+  cow_id: data.cow_id,
+  log_date: toDate(data.log_date),
+  morning_liters: toNumber(data.morning_liters),
+  evening_liters: toNumber(data.evening_liters),
+  total_liters: toNumber(data.total_liters),
+  sold_liters: toNumber(data.sold_liters),
+  price_per_liter: toNumber(data.price_per_liter),
+  income: toNumber(data.income),
+});
 
 const fmt = (n) => `৳${(n || 0).toLocaleString("bn-BD")}`;
 const TABS = ["সারসংক্ষেপ", "স্বাস্থ্য", "খরচ / আয়", "বিক্রি"];
@@ -149,13 +170,26 @@ function StatCell({ label, value, color }) {
 
 // ── Tab: সারসংক্ষেপ ──────────────────────────────────────────────────────
 function OverviewTab({ cow }) {
-  const totalCost =
-    (cow.purchaseCost || 0) +
-    (cow.feedCost || 0) +
-    (cow.medicineCost || 0) +
-    (cow.otherCost || 0) +
-    (cow.laborCost || 0);
-  const profit = (cow.price || 0) - totalCost;
+  // Calculate total cost from all costs
+  const costsByType = {
+    feed: 0,
+    medicine: 0,
+    labor: 0,
+    other: 0,
+  };
+
+  (cow.costs || []).forEach((cost) => {
+    if (costsByType.hasOwnProperty(cost.type)) {
+      costsByType[cost.type] += cost.amount || 0;
+    }
+  });
+
+  const purchaseCost = toNumber(cow.price || 0);
+  const totalCostFromDb = Object.values(costsByType).reduce((a, b) => a + b, 0);
+  const totalCost = purchaseCost + totalCostFromDb;
+  
+  const sellingPrice = toNumber(cow.sale_price || 0);
+  const profit = sellingPrice - totalCost;
 
   return (
     <View>
@@ -169,12 +203,12 @@ function OverviewTab({ cow }) {
         />
         <StatCell
           label="Health Score"
-          value={`${cow.healthScore} / ১০০`}
+          value={`${toNumber(cow.health_score)} / ১০০`}
           color={Colors.primary}
         />
         <StatCell
           label="টিকার অবস্থা"
-          value={`${cow.vaccines?.filter((v) => v.givenDate).length || 0}/${cow.vaccines?.length || 0} সম্পন্ন`}
+          value={`${(cow.vaccines || []).filter((v) => v.given_date).length || 0}/${(cow.vaccines || []).length || 0} সম্পন্ন`}
         />
       </View>
 
@@ -183,19 +217,18 @@ function OverviewTab({ cow }) {
         <InfoRow
           icon="calendar-outline"
           label="খামারে যোগ দিয়েছে"
-          value={cow.createdAt || "—"}
+          value={cow.created_at?.split('T')[0] || "—"}
         />
         <InfoRow icon="paw-outline" label="প্রজাতি" value={cow.breed} />
         <InfoRow
           icon="barbell-outline"
-          label="সর্বশেষ ওজন আপডেট"
-          value={`${cow.weightKg} কেজি`}
-          onAction={() => {}}
+          label="সর্বশেষ ওজন"
+          value={`${cow.weight_kg} কেজি`}
         />
         <InfoRow
           icon="location-outline"
           label="অবস্থান"
-          value={`${cow.upazila}, ${cow.district}`}
+          value={`${cow.upazila || '—'}, ${cow.district || '—'}`}
           last
         />
       </View>
@@ -215,64 +248,29 @@ function OverviewTab({ cow }) {
 
 // ── Tab: স্বাস্থ্য ───────────────────────────────────────────────────────
 function HealthTab({ cow }) {
-  const d = cow.healthDetails || {};
   return (
     <View>
-      <Text style={styles.secLabel}>Health Score বিশ্লেষণ</Text>
+      <Text style={styles.secLabel}>স্বাস্থ্য অবস্থা</Text>
       <View style={styles.rowsCard}>
-        <View style={{ padding: Spacing.md, gap: 10 }}>
-          <ScoreBar
-            label="💉 টিকা"
-            value={d.vaccination || 0}
-            max={30}
-            color={Colors.healthExcellent}
-          />
-          <ScoreBar
-            label="💊 ওষুধ ইতিহাস"
-            value={d.medicine || 0}
-            max={25}
-            color={Colors.healthGood}
-          />
-          <ScoreBar
-            label="⚖️ ওজন (বয়স অনুযায়ী)"
-            value={d.weight || 0}
-            max={25}
-            color={Colors.healthAverage}
-          />
-          <ScoreBar
-            label="📅 বয়স"
-            value={d.age || 0}
-            max={10}
-            color={Colors.primary}
-          />
-          <ScoreBar
-            label="🌾 নিয়মিত খাবার"
-            value={d.feeding || 0}
-            max={10}
-            color={Colors.accent}
-          />
-        </View>
-        {d.expectedWeightKg ? (
-          <View style={styles.expectedBox}>
-            <Ionicons
-              name="information-circle-outline"
-              size={14}
-              color={Colors.textMuted}
-            />
-            <Text style={styles.expectedText}>
-              {cow.breed} প্রজাতির {cow.ageMonths} মাস বয়সে প্রত্যাশিত ওজন:{" "}
-              {d.expectedWeightKg} কেজি
+        <View style={styles.infoRow}>
+          <View style={[styles.infoIcon, { backgroundColor: Colors.primary + "18" }]}>
+            <Ionicons name="heart-outline" size={15} color={Colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.infoLabel}>স্বাস্থ্য স্কোর</Text>
+            <Text style={[styles.infoValue, { fontWeight: '800', fontSize: FontSize.xl, color: Colors.primary }]}>
+              {toNumber(cow.health_score)} / ১০০
             </Text>
           </View>
-        ) : null}
+        </View>
       </View>
 
       <Text style={styles.secLabel}>টিকার তালিকা</Text>
       <View style={styles.rowsCard}>
         {(cow.vaccines || []).map((v, i) => {
-          const given = !!v.givenDate;
+          const given = !!v.given_date;
           const overdue =
-            !given && v.dueDate && new Date(v.dueDate) < new Date();
+            !given && v.due_date && new Date(v.due_date) < new Date();
           const color = given
             ? Colors.success
             : overdue
@@ -292,8 +290,8 @@ function HealthTab({ cow }) {
               ]}
             >
               <View style={[styles.vacDot, { backgroundColor: color }]} />
-              <Text style={styles.vacName}>{v.name}</Text>
-              <Text style={styles.vacDate}>{v.givenDate || v.dueDate}</Text>
+              <Text style={styles.vacName}>{v.vaccine_name}</Text>
+              <Text style={styles.vacDate}>{v.given_date || v.due_date}</Text>
               <View
                 style={[styles.vacBadge, { backgroundColor: color + "18" }]}
               >
@@ -328,8 +326,9 @@ function HealthTab({ cow }) {
               <Ionicons name="medkit-outline" size={15} color={Colors.error} />
             </View>
             <View style={styles.infoContent}>
-              <Text style={styles.infoLabel}>{m.date}</Text>
-              <Text style={styles.infoValue}>{m.reason}</Text>
+              <Text style={styles.infoLabel}>{m.treatment_date}</Text>
+              <Text style={styles.infoValue}>{m.medicine_name}</Text>
+              <Text style={styles.infoLabel}>{m.reason}</Text>
             </View>
             {m.cost ? (
               <Text style={styles.infoAction}>{fmt(m.cost)}</Text>
@@ -346,39 +345,63 @@ function HealthTab({ cow }) {
 
 // ── Tab: খরচ / আয় ────────────────────────────────────────────────────────
 function CostsTab({ cow }) {
+  // Group costs by type
+  const costsByType = {
+    feed: 0,
+    medicine: 0,
+    labor: 0,
+    other: 0,
+  };
+  
+  const milkIncomeTotal = (cow.milkLogs || []).reduce((sum, log) => sum + (log.income || 0), 0);
+  
+  (cow.costs || []).forEach((cost) => {
+    if (costsByType.hasOwnProperty(cost.type)) {
+      costsByType[cost.type] += cost.amount || 0;
+    }
+  });
+
+  // Calculate total investment
+  const purchaseCost = toNumber(cow.price || 0);
+  const totalCostFromDb = Object.values(costsByType).reduce((a, b) => a + b, 0);
+  const totalInvestment = purchaseCost + totalCostFromDb;
+  
+  // Calculate profit
+  const sellingPrice = toNumber(cow.sale_price || 0);
+  const profit = sellingPrice - totalInvestment;
+
   const costs = [
     {
       label: "ক্রয় মূল্য",
-      value: cow.purchaseCost,
+      value: purchaseCost,
       icon: "cart-outline",
       color: "#6A1B9A",
     },
     {
       label: "খাবার",
-      value: cow.feedCost,
+      value: costsByType.feed,
       icon: "leaf-outline",
       color: Colors.primary,
     },
     {
       label: "ওষুধ",
-      value: cow.medicineCost,
+      value: costsByType.medicine,
       icon: "medkit-outline",
       color: Colors.error,
     },
     {
       label: "শ্রমিক",
-      value: cow.laborCost,
+      value: costsByType.labor,
       icon: "people-outline",
       color: Colors.warning,
     },
     {
       label: "অন্যান্য",
-      value: cow.otherCost,
+      value: costsByType.other,
       icon: "cube-outline",
       color: Colors.textMuted,
     },
   ];
-  const total = costs.reduce((s, c) => s + (c.value || 0), 0);
 
   return (
     <View>
@@ -430,7 +453,7 @@ function CostsTab({ cow }) {
               },
             ]}
           >
-            মোট খরচ
+            মোট বিনিয়োগ
           </Text>
           <Text
             style={{
@@ -439,8 +462,28 @@ function CostsTab({ cow }) {
               color: Colors.primary,
             }}
           >
-            {fmt(total)}
+            {fmt(totalInvestment)}
           </Text>
+        </View>
+      </View>
+
+      {/* Profit summary */}
+      <Text style={styles.secLabel}>আনুমানিক মুনাফা</Text>
+      <View style={[styles.rowsCard, { backgroundColor: profit >= 0 ? Colors.success + "08" : Colors.error + "08" }]}>
+        <View style={styles.infoRow}>
+          <View style={[styles.infoIcon, { backgroundColor: (profit >= 0 ? Colors.success : Colors.error) + "25" }]}>
+            <Ionicons 
+              name={profit >= 0 ? "trending-up-outline" : "trending-down-outline"} 
+              size={15} 
+              color={profit >= 0 ? Colors.success : Colors.error} 
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.infoLabel}>বিক্রয় মূল্য - মোট বিনিয়োগ</Text>
+            <Text style={[styles.infoValue, { color: profit >= 0 ? Colors.success : Colors.error, fontWeight: "800" }]}>
+              {fmt(profit)} {profit >= 0 ? '(লাভ)' : '(ক্ষতি)'}
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -454,13 +497,13 @@ function CostsTab({ cow }) {
               i < cow.milkLogs.length - 1 && styles.infoRowBorder,
             ]}
           >
-            <Text style={styles.milkDate}>{l.date}</Text>
+            <Text style={styles.milkDate}>{l.log_date}</Text>
             <View style={styles.milkVals}>
               <Text style={styles.milkVal}>
-                সকাল <Text style={styles.milkValBold}>{l.morning} লি.</Text>
+                সকাল <Text style={styles.milkValBold}>{l.morning_liters} লি.</Text>
               </Text>
               <Text style={styles.milkVal}>
-                বিকাল <Text style={styles.milkValBold}>{l.evening} লি.</Text>
+                বিকাল <Text style={styles.milkValBold}>{l.evening_liters} লি.</Text>
               </Text>
             </View>
             <Text style={styles.milkIncome}>{fmt(l.income)}</Text>
@@ -476,10 +519,10 @@ function CostsTab({ cow }) {
 
 // ── Tab: বিক্রি ───────────────────────────────────────────────────────────
 function SaleTab({ cow, onUpdate }) {
-  const [price, setPrice] = useState(String(cow.price || ""));
-  const [weightKg, setWeightKg] = useState(String(cow.weightKg || ""));
-  const [isForSale, setIsForSale] = useState(cow.isForSale !== false);
-  const [note, setNote] = useState("");
+  const [price, setPrice] = useState(String(cow.sale_price || ""));
+  const [weightKg, setWeightKg] = useState(String(cow.weight_kg || ""));
+  const [isForSale, setIsForSale] = useState(cow.is_for_sale !== false);
+  const [note, setNote] = useState(cow.description);
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
@@ -487,19 +530,26 @@ function SaleTab({ cow, onUpdate }) {
       Alert.alert("", "সঠিক মূল্য দিন।");
       return;
     }
+    
     setSaving(true);
     try {
-      await api.put(`/cows/${cow.id}`, {
-        price: parseFloat(price),
-        weightKg: parseFloat(weightKg) || cow.weightKg,
-        isForSale,
-        status: isForSale ? "available" : "available",
+      // সরাসরি cow.id ব্যবহার করে ডকুমেন্টের রেফারেন্স তৈরি করা হচ্ছে [1]
+      const cowDocRef = doc(db, 'cows', cow.id);
+      
+      // সরাসরি আপডেট অপারেশন [1]
+      await updateDoc(cowDocRef, {
+        sale_price: parseFloat(price),
+        weight_kg: parseFloat(weightKg) || cow.weight_kg,
+        is_for_sale: isForSale,
+        status: isForSale ? 'available' : 'unavailable',
+        description: note,
       });
+      
       Alert.alert("✅ সফল", "গরুর তথ্য আপডেট হয়েছে।");
       onUpdate?.();
-    } catch {
-      // Demo: show success anyway
-      Alert.alert("✅ আপডেট হয়েছে", "গরুর বিক্রির তথ্য সংরক্ষিত হয়েছে।");
+    } catch (err) {
+      console.error('Save error:', err);
+      Alert.alert("❌ ত্রুটি", "সংরক্ষণ ব্যর্থ হয়েছে।");
     } finally {
       setSaving(false);
     }
@@ -664,11 +714,76 @@ export default function FarmerCowDetailScreen() {
 
   const loadCow = useCallback(async () => {
     try {
-      const res = await api.get(`/cows/${id}`);
-      setCow(res.data.data);
-    } catch {
-      // Use mock data if API fails
-      setCow(MOCK_COW);
+      setLoading(true);
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        Alert.alert('ত্রুটি', 'লগইন করুন');
+        return;
+      }
+
+      // Get user ID by firebase_uid
+      const usersSnap = await getDocs(
+        query(collection(db, 'users'), where('firebase_uid', '==', currentUser.uid))
+      );
+      if (usersSnap.empty) {
+        Alert.alert('ত্রুটি', 'ব্যবহারকারী খুঁজে পাওয়া যায়নি');
+        setCow(null);
+        return;
+      }
+
+      
+      // Get the cow document
+      
+      const docRef = doc(db, 'cows', id); 
+      // const cowSnap = await getDocs(
+      //   query(collection(db, 'cows'), where('id', '==', id))
+      // );
+      const cowDoc = await getDoc(docRef); 
+
+      
+      // DocumentSnapshot-এর অস্তিত্ব চেক করার সঠিক নিয়ম
+      if (!cowDoc.exists()) {
+        console.log('duske');
+        setCow(null);
+        return;
+      }
+      const cowData = normalizeCow({ id: cowDoc.id, ...cowDoc.data() });
+      console.log(cowData);
+
+      // Get related data in parallel
+      const [vaccinesSnap, medicinesSnap, costsSnap, milkLogsSnap] = await Promise.all([
+        getDocs(query(collection(db, 'vaccines'), where('cow_id', '==', cowDoc.id))),
+        getDocs(query(collection(db, 'medicines'), where('cow_id', '==', cowDoc.id))),
+        getDocs(query(collection(db, 'costs'), where('cow_id', '==', cowDoc.id))),
+        getDocs(query(collection(db, 'milk_logs'), where('cow_id', '==', cowDoc.id))),
+      ]);
+
+      const vaccines = vaccinesSnap.docs.map((doc) =>
+        normalizeVaccine({ id: doc.id, ...doc.data() })
+      );
+
+      const medicines = medicinesSnap.docs.map((doc) =>
+        normalizeMedicine({ id: doc.id, ...doc.data() })
+      );
+
+      const costs = costsSnap.docs.map((doc) =>
+        normalizeCost({ id: doc.id, ...doc.data() })
+      );
+
+      const milkLogs = milkLogsSnap.docs.map((doc) =>
+        normalizeMilkLog({ id: doc.id, ...doc.data() })
+      );
+
+      setCow({
+        ...cowData,
+        vaccines,
+        medicines,
+        costs,
+        milkLogs,
+      });
+    } catch (err) {
+      console.error('Error loading cow:', err);
+      setCow(null);
     } finally {
       setLoading(false);
     }
@@ -700,13 +815,13 @@ export default function FarmerCowDetailScreen() {
   }
 
   const healthColor =
-    cow.healthScore >= 85
+    toNumber(cow.health_score) >= 85
       ? Colors.healthExcellent
-      : cow.healthScore >= 70
+      : toNumber(cow.health_score) >= 70
         ? Colors.healthGood
-        : cow.healthScore >= 50
+        : toNumber(cow.health_score) >= 50
           ? Colors.healthAverage
-          : cow.healthScore >= 30
+          : toNumber(cow.health_score) >= 30
             ? Colors.healthWeak
             : Colors.healthBad;
 
@@ -765,15 +880,15 @@ export default function FarmerCowDetailScreen() {
             ]}
           >
             <Text style={styles.badgeText}>
-              {cow.isForSale ? "পাওয়া যাচ্ছে" : "তালিকায় নেই"}
+              {cow.is_for_sale ? "পাওয়া যাচ্ছে" : "তালিকায় নেই"}
             </Text>
           </View>
         </View>
 
         {/* Health ring */}
         <ScoreRing
-          score={cow.healthScore || 0}
-          grade={cow.healthGrade || "—"}
+          score={toNumber(cow.health_score) || 0}
+          grade="—"
         />
 
         {/* Photo dots */}
@@ -790,7 +905,7 @@ export default function FarmerCowDetailScreen() {
           <Text style={styles.cowBreed}>{cow.breed}</Text>
           <Text style={styles.cowName}>{cow.name || cow.breed}</Text>
         </View>
-        <Text style={styles.cowPrice}>{fmt(cow.price)}</Text>
+        <Text style={styles.cowPrice}>{fmt(cow.sale_price)}</Text>
       </View>
 
       {/* ── Chips ── */}
@@ -801,10 +916,10 @@ export default function FarmerCowDetailScreen() {
           </Text>
         </View>
         <View style={styles.chip}>
-          <Text style={styles.chipText}>বয়স {cow.ageMonths} মাস</Text>
+          <Text style={styles.chipText}>বয়স {cow.age_months} মাস</Text>
         </View>
         <View style={styles.chip}>
-          <Text style={styles.chipText}>ওজন {cow.weightKg} কেজি</Text>
+          <Text style={styles.chipText}>ওজন {cow.weight_kg} কেজি</Text>
         </View>
         <View style={styles.chip}>
           <Text style={styles.chipText}>📍 {cow.district}</Text>

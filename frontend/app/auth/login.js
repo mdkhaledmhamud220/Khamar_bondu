@@ -1,50 +1,99 @@
-import React, { useState } from 'react';
+import { LinearGradient } from "expo-linear-gradient";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  KeyboardAvoidingView, Platform, Image, Alert,
-} from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import Input  from '../../components/Input';
-import Button from '../../components/Button';
-import { Colors, FontSize, Spacing, BorderRadius, Shadow } from '../../constants/theme';
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+} from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
+import { useState } from "react";
+import {
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import Button from "../../components/Button";
+import Input from "../../components/Input";
+import {
+  BorderRadius,
+  Colors,
+  FontSize,
+  Shadow,
+  Spacing,
+} from "../../constants/theme";
+import { auth, db } from "../../firebaseConfig";
 
 export default function LoginScreen() {
   const router = useRouter();
-  const [email,    setEmail]    = useState('');
-  const [password, setPassword] = useState('');
-  const [loading,  setLoading]  = useState(false);
-  const [errors,   setErrors]   = useState({});
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState({});
   const { role } = useLocalSearchParams();
 
   const validate = () => {
     const e = {};
-    if (!email.trim())         e.email    = 'ইমেইল দিন';
-    else if (!/\S+@\S+\.\S+/.test(email)) e.email = 'সঠিক ইমেইল দিন';
-    if (!password)             e.password = 'পাসওয়ার্ড দিন';
-    else if (password.length < 6) e.password = 'পাসওয়ার্ড কমপক্ষে ৬ অক্ষর';
+    if (!email.trim()) e.email = "ইমেইল দিন";
+    else if (!/\S+@\S+\.\S+/.test(email)) e.email = "সঠিক ইমেইল দিন";
+    if (!password) e.password = "পাসওয়ার্ড দিন";
+    else if (password.length < 6) e.password = "পাসওয়ার্ড কমপক্ষে ৬ অক্ষর";
     setErrors(e);
     return Object.keys(e).length === 0;
   };
 
   const handleLogin = async () => {
-    // if (!validate()) return;
+    if (!validate()) return;
     setLoading(true);
+    console.log("hi");
     try {
-      // await signInWithEmailAndPassword(auth, email.trim(), password);
-      if (role === 'farmer') {
-        router.replace('./../farmer/(tabs)/home'); 
+      const userCredential = await signInWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password,
+      );
+      const user = userCredential.user;
+
+      // ২. Firestore-এর 'users' কালেকশন থেকে ইউজারের ডকুমেন্ট রিড করুন
+      const userDocRef = doc(db, "users", user.uid);
+      const userDocSnap = await getDoc(userDocRef);
+
+      if (userDocSnap.exists()) {
+        const dbRole = userDocSnap.data().role; // ডাটাবেসে সেভ থাকা রোল
+
+        // ৩. ডাটাবেসের রোলের সাথে স্ক্রিনের নির্বাচিত রোল (role) মিলিয়ে দেখুন
+        if (dbRole === role) {
+          if (dbRole === "farmer") {
+            router.replace("./../farmer/select");
+          } else {
+            router.replace("./../(buyer)/(tabs)/home");
+          }
+        } else {
+          // রোল না মিললে অ্যালার্ট দিন এবং অটোমেটিক সাইন-আউট করে দিন
+          Alert.alert(
+            "লগইন ব্যর্থ",
+            "আপনার অ্যাকাউন্টের ধরনের সাথে নির্বাচিত রোল মিলছে না!",
+          );
+          await auth.signOut();
+        }
       } else {
-        router.replace('./../(buyer)/(tabs)/home'); 
+        Alert.alert(
+          "ত্রুটি",
+          "আপনার প্রোফাইলের কোনো তথ্য ডাটাবেসে পাওয়া যায়নি!",
+        );
+        await auth.signOut();
       }
     } catch (err) {
       const msg =
-        err.code === 'auth/user-not-found'   ? 'এই ইমেইলে কোনো অ্যাকাউন্ট নেই।' :
-        err.code === 'auth/wrong-password'   ? 'পাসওয়ার্ড ভুল হয়েছে।' :
-        err.code === 'auth/too-many-requests'? 'অনেকবার চেষ্টা করা হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন।' :
-        'লগইন করা যায়নি। আবার চেষ্টা করুন।';
-      Alert.alert('লগইন ব্যর্থ', msg);
+        err.code === "auth/invalid-credential"
+          ? "ইমেইল অথবা পাসওয়ার্ড ভুল হয়েছে।"
+          : err.code === "auth/too-many-requests"
+            ? "অনেকবার চেষ্টা করা হয়েছে। কিছুক্ষণ পর আবার চেষ্টা করুন।"
+            : "লগইন করা যায়নি। আবার চেষ্টা করুন।";
+      Alert.alert("লগইন ব্যর্থ", msg);
     } finally {
       setLoading(false);
     }
@@ -52,21 +101,27 @@ export default function LoginScreen() {
 
   const handleForgotPassword = async () => {
     if (!email.trim()) {
-      Alert.alert('ইমেইল দিন', 'পাসওয়ার্ড রিসেটের জন্য আগে ইমেইল লিখুন।');
+      Alert.alert("ইমেইল দিন", "পাসওয়ার্ড রিসেটের জন্য আগে ইমেইল লিখুন।");
       return;
     }
     try {
       await sendPasswordResetEmail(auth, email.trim());
-      Alert.alert('✉️ ইমেইল পাঠানো হয়েছে', 'পাসওয়ার্ড রিসেটের লিংক আপনার ইমেইলে পাঠানো হয়েছে।');
+      Alert.alert(
+        "✉️ ইমেইল পাঠানো হয়েছে",
+        "পাসওয়ার্ড রিসেটের লিংক আপনার ইমেইলে পাঠানো হয়েছে।",
+      );
     } catch {
-      Alert.alert('সমস্যা হয়েছে', 'ইমেইল পাঠানো যায়নি। ইমেইল ঠিকানা যাচাই করুন।');
+      Alert.alert(
+        "সমস্যা হয়েছে",
+        "ইমেইল পাঠানো যায়নি। ইমেইল ঠিকানা যাচাই করুন।",
+      );
     }
   };
 
   return (
     <KeyboardAvoidingView
       style={styles.flex}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
       <ScrollView
         style={styles.flex}
@@ -98,9 +153,9 @@ export default function LoginScreen() {
         <View style={styles.card}>
           <Text style={styles.title}>স্বাগতম! 👋</Text>
           <Text style={styles.subtitle}>
-            {role === 'farmer'
-              ? 'খামারি হিসেবে লগইন করুন'
-              : 'ক্রেতা হিসেবে লগইন করুন'}
+            {role === "farmer"
+              ? "খামারি হিসেবে লগইন করুন"
+              : "ক্রেতা হিসেবে লগইন করুন"}
           </Text>
 
           <View style={styles.form}>
@@ -123,7 +178,10 @@ export default function LoginScreen() {
               error={errors.password}
             />
 
-            <TouchableOpacity onPress={handleForgotPassword} style={styles.forgotBtn}>
+            <TouchableOpacity
+              onPress={handleForgotPassword}
+              style={styles.forgotBtn}
+            >
               <Text style={styles.forgotText}>পাসওয়ার্ড ভুলে গেছেন?</Text>
             </TouchableOpacity>
 
@@ -144,7 +202,9 @@ export default function LoginScreen() {
             {/* Register link */}
             <View style={styles.registerRow}>
               <Text style={styles.registerText}>নতুন অ্যাকাউন্ট নেই? </Text>
-              <TouchableOpacity onPress={() => router.push(`/auth/register?role=${role}`)}>
+              <TouchableOpacity
+                onPress={() => router.push(`/auth/register?role=${role}`)}
+              >
                 <Text style={styles.registerLink}>নিবন্ধন করুন</Text>
               </TouchableOpacity>
             </View>
@@ -159,38 +219,60 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  flex:       { flex: 1, backgroundColor: Colors.background },
-  scroll:     { flexGrow: 1 },
+  flex: { flex: 1, backgroundColor: Colors.background },
+  scroll: { flexGrow: 1 },
 
   // Header
   header: {
     paddingTop: 70,
     paddingBottom: 50,
     paddingHorizontal: Spacing.xl,
-    alignItems: 'center',
-    overflow: 'hidden',
+    alignItems: "center",
+    overflow: "hidden",
   },
   circle1: {
-    position: 'absolute', width: 200, height: 200,
-    borderRadius: 100, backgroundColor: 'rgba(255,255,255,0.06)',
-    top: -60, right: -50,
+    position: "absolute",
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: "rgba(255,255,255,0.06)",
+    top: -60,
+    right: -50,
   },
   circle2: {
-    position: 'absolute', width: 140, height: 140,
-    borderRadius: 70, backgroundColor: 'rgba(255,255,255,0.05)',
-    bottom: -30, left: -20,
+    position: "absolute",
+    width: 140,
+    height: 140,
+    borderRadius: 70,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    bottom: -30,
+    left: -20,
   },
-  logoWrap:   { alignItems: 'center', zIndex: 1 },
-  logoIcon:   {
-    width: 80, height: 80, borderRadius: 40,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center', justifyContent: 'center',
+  logoWrap: { alignItems: "center", zIndex: 1 },
+  logoIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
     marginBottom: Spacing.md,
-    borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)',
+    borderWidth: 2,
+    borderColor: "rgba(255,255,255,0.3)",
   },
-  logoEmoji:  { fontSize: 38 },
-  appName:    { fontSize: FontSize.xxxl, fontWeight: '800', color: Colors.white, letterSpacing: 1 },
-  tagline:    { fontSize: FontSize.sm, color: 'rgba(255,255,255,0.8)', marginTop: 6, letterSpacing: 0.5 },
+  logoEmoji: { fontSize: 38 },
+  appName: {
+    fontSize: FontSize.xxxl,
+    fontWeight: "800",
+    color: Colors.white,
+    letterSpacing: 1,
+  },
+  tagline: {
+    fontSize: FontSize.sm,
+    color: "rgba(255,255,255,0.8)",
+    marginTop: 6,
+    letterSpacing: 0.5,
+  },
 
   // Card
   card: {
@@ -201,23 +283,57 @@ const styles = StyleSheet.create({
     padding: Spacing.xl,
     ...Shadow.lg,
   },
-  title:      { fontSize: FontSize.xxl, fontWeight: '800', color: Colors.textPrimary, marginBottom: 4 },
-  subtitle:   { fontSize: FontSize.sm, color: Colors.textMuted, marginBottom: Spacing.xl },
+  title: {
+    fontSize: FontSize.xxl,
+    fontWeight: "800",
+    color: Colors.textPrimary,
+    marginBottom: 4,
+  },
+  subtitle: {
+    fontSize: FontSize.sm,
+    color: Colors.textMuted,
+    marginBottom: Spacing.xl,
+  },
 
-  form:       { gap: 0 },
+  form: { gap: 0 },
 
-  forgotBtn:  { alignSelf: 'flex-end', marginTop: -4, marginBottom: Spacing.lg },
-  forgotText: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: '600' },
+  forgotBtn: { alignSelf: "flex-end", marginTop: -4, marginBottom: Spacing.lg },
+  forgotText: {
+    fontSize: FontSize.sm,
+    color: Colors.primary,
+    fontWeight: "600",
+  },
 
-  loginBtn:   { marginTop: Spacing.xs },
+  loginBtn: { marginTop: Spacing.xs },
 
-  divider:    { flexDirection: 'row', alignItems: 'center', marginVertical: Spacing.lg },
-  dividerLine:{ flex: 1, height: 1, backgroundColor: Colors.border },
-  dividerText:{ marginHorizontal: Spacing.md, color: Colors.textMuted, fontSize: FontSize.sm },
+  divider: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: Spacing.lg,
+  },
+  dividerLine: { flex: 1, height: 1, backgroundColor: Colors.border },
+  dividerText: {
+    marginHorizontal: Spacing.md,
+    color: Colors.textMuted,
+    fontSize: FontSize.sm,
+  },
 
-  registerRow:   { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  registerText:  { color: Colors.textMuted, fontSize: FontSize.sm },
-  registerLink:  { color: Colors.primary, fontWeight: '700', fontSize: FontSize.sm },
+  registerRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  registerText: { color: Colors.textMuted, fontSize: FontSize.sm },
+  registerLink: {
+    color: Colors.primary,
+    fontWeight: "700",
+    fontSize: FontSize.sm,
+  },
 
-  footer:     { textAlign: 'center', color: Colors.textMuted, fontSize: FontSize.xs, paddingVertical: Spacing.xl },
+  footer: {
+    textAlign: "center",
+    color: Colors.textMuted,
+    fontSize: FontSize.xs,
+    paddingVertical: Spacing.xl,
+  },
 });

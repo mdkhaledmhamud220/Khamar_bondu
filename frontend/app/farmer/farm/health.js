@@ -5,11 +5,107 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-// import api from '../../config/api';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors, FontSize, Spacing, BorderRadius, Shadow } from '../../../constants/theme';
+import { addDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { auth, db } from '../../../firebaseConfig';
 
 const today = () => new Date().toISOString().split('T')[0];
+const toNumber = (value) => Number(value) || 0;
+const toDate = (value) => {
+  if (!value) return null;
+  if (value?.toDate) return value.toDate();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const gradeFromScore = (score) => {
+  if (score >= 85) return 'অসাধারণ';
+  if (score >= 70) return 'ভালো';
+  if (score >= 50) return 'মোটামুটি';
+  if (score >= 30) return 'দুর্বল';
+  return 'খারাপ';
+};
+
+const normalizeCow = (doc) => ({
+  id: doc.id,
+  ...doc,
+  farm_id: doc.farm_id ?? doc.farmId ?? null,
+  name: doc.name || '',
+  breed: doc.breed || '',
+  gender: doc.gender || '',
+  age_months: toNumber(doc.age_months ?? doc.ageMonths),
+  weight_kg: toNumber(doc.weight_kg ?? doc.weightKg),
+  health_score: toNumber(doc.health_score ?? doc.healthScore),
+  status: doc.status || 'draft',
+  vaccines: Array.isArray(doc.vaccines) ? doc.vaccines : [],
+  medicines: Array.isArray(doc.medicines) ? doc.medicines : [],
+});
+
+const normalizeVaccine = (doc) => ({
+  id: doc.id,
+  ...doc,
+  cow_id: doc.cow_id ?? doc.cowId ?? null,
+  vaccine_name: doc.vaccine_name ?? doc.name ?? '',
+  given_date: doc.given_date ?? doc.givenDate ?? null,
+  due_date: doc.due_date ?? doc.dueDate ?? null,
+  status: doc.status || 'pending',
+  vet_name: doc.vet_name ?? doc.vetName ?? '',
+});
+
+const normalizeMedicine = (doc) => ({
+  id: doc.id,
+  ...doc,
+  cow_id: doc.cow_id ?? doc.cowId ?? null,
+  medicine_name: doc.medicine_name ?? doc.name ?? '',
+  reason: doc.reason ?? '',
+  treatment_date: doc.treatment_date ?? doc.date ?? null,
+  cost: toNumber(doc.cost),
+});
+
+const getCowDetails = (cow, vaccines = [], medicines = []) => {
+  const latestWeightKg = cow.weight_kg || 0;
+  const ageMonths = cow.age_months || 0;
+  const overdueVaccines = vaccines.filter((v) => {
+    const dueDate = toDate(v.due_date);
+    const givenDate = toDate(v.given_date);
+    return !givenDate && dueDate && dueDate < new Date();
+  }).length;
+
+  const pendingVaccines = vaccines.filter((v) => !toDate(v.given_date)).length;
+  const recentMedicines = medicines.filter((m) => {
+    const tDate = toDate(m.treatment_date);
+    if (!tDate) return false;
+    const diffDays = (Date.now() - tDate.getTime()) / (1000 * 60 * 60 * 24);
+    return diffDays <= 30;
+  }).length;
+
+  const expectedWeightKg = ageMonths > 0 ? Math.round(ageMonths * 8) : 0;
+  const weightDelta = expectedWeightKg > 0 ? Math.abs(expectedWeightKg - latestWeightKg) / expectedWeightKg : 0;
+
+  const vaccination = Math.max(0, 30 - overdueVaccines * 6 - pendingVaccines * 2);
+  const medicine = Math.max(0, 25 - recentMedicines * 4);
+  const weight = expectedWeightKg > 0 ? Math.max(0, 25 - Math.round(weightDelta * 25)) : 15;
+  const age = ageMonths > 0 ? Math.min(10, Math.max(4, Math.round(ageMonths / 6))) : 4;
+  const feeding = medicines.length > 0 ? 8 : 10;
+
+  const healthDetails = {
+    vaccination,
+    medicine,
+    weight,
+    age,
+    feeding,
+    expectedWeightKg,
+  };
+
+  const healthScore = Math.max(0, Math.min(100, vaccination + medicine + weight + age + feeding));
+
+  return {
+    healthScore: cow.health_score || healthScore,
+    healthGrade: cow.health_score ? gradeFromScore(cow.health_score) : gradeFromScore(healthScore),
+    healthDetails,
+  };
+};
 
 // ── Health Score Ring ──────────────────────────────────────────────────────
 function ScoreRing({ score, grade }) {
@@ -93,15 +189,34 @@ function AddHealthModal({ visible, cow, mode, onClose, onSaved }) {
 
     setLoading(true);
     try {
+      if (mode === 'vaccine') {
+        await addDoc(collection(db, 'vaccines'), {
+          cow_id: cow.id,
+          vaccine_name: name.trim(),
+          given_date: date,
+          due_date: dueDate || null,
+          status: date ? 'given' : 'pending',
+          vet_name: '',
+        });
+      } else {
+        await addDoc(collection(db, 'medicines'), {
+          cow_id: cow.id,
+          medicine_name: name.trim(),
+          reason: reason.trim() || name.trim(),
+          treatment_date: date,
+        });
+      }
+
       Alert.alert(
         '✅ সফল',
-        `${mode === 'vaccine' ? 'টিকা' : 'ওষুধ'} যোগ হয়েছে (mock)।`
+        `${mode === 'vaccine' ? 'টিকা' : 'ওষুধ'} যোগ হয়েছে।`
       );
 
       reset();
       onSaved();
       onClose();
     } catch (e) {
+      console.error(e);
       Alert.alert('ত্রুটি', 'সংরক্ষণ করা যায়নি।');
     } finally {
       setLoading(false);
@@ -134,7 +249,7 @@ function AddHealthModal({ visible, cow, mode, onClose, onSaved }) {
               <Text style={styles.cowInfoEmoji}>🐄</Text>
               <View>
                 <Text style={styles.cowInfoName}>{cow.name || cow.breed}</Text>
-                <Text style={styles.cowInfoSub}>Health Score: {cow.healthScore} • {cow.healthGrade}</Text>
+                <Text style={styles.cowInfoSub}>Health Score: {cow.health_score} • {cow.healthGrade}</Text>
               </View>
             </View>
           )}
@@ -197,20 +312,20 @@ function AddHealthModal({ visible, cow, mode, onClose, onSaved }) {
 function CowHealthCard({ cow, onAddVaccine, onAddMedicine, expanded, onToggle }) {
   const details = cow.healthDetails || {};
   const color =
-    cow.healthScore >= 85 ? Colors.healthExcellent :
-    cow.healthScore >= 70 ? Colors.healthGood :
-    cow.healthScore >= 50 ? Colors.healthAverage :
-    cow.healthScore >= 30 ? Colors.healthWeak : Colors.healthBad;
+    cow.health_score >= 85 ? Colors.healthExcellent :
+    cow.health_score >= 70 ? Colors.healthGood :
+    cow.health_score >= 50 ? Colors.healthAverage :
+    cow.health_score >= 30 ? Colors.healthWeak : Colors.healthBad;
 
   return (
     <View style={styles.healthCard}>
       {/* Card Header */}
       <TouchableOpacity style={styles.healthCardHeader} onPress={onToggle} activeOpacity={0.8}>
-        <ScoreRing score={cow.healthScore || 0} grade={cow.healthGrade || 'অজানা'} />
+        <ScoreRing score={cow.health_score || 0} grade={cow.healthGrade || 'অজানা'} />
         <View style={styles.healthCardInfo}>
           <Text style={styles.healthCardName}>{cow.name || cow.breed}</Text>
           <Text style={styles.healthCardSub}>
-            {cow.breed} • {cow.ageMonths} মাস • {cow.weightKg} কেজি
+            {cow.breed} • {cow.age_months} মাস • {cow.weight_kg} কেজি
           </Text>
           <View style={[styles.scoreBadge, { backgroundColor: color + '18' }]}>
             <View style={[styles.scoreDot, { backgroundColor: color }]} />
@@ -248,19 +363,19 @@ function CowHealthCard({ cow, onAddVaccine, onAddMedicine, expanded, onToggle })
             <>
               <Text style={[styles.expandedTitle, { marginTop: Spacing.lg }]}>টিকার ইতিহাস</Text>
               {cow.vaccines.map((v, i) => {
-                const isOverdue = v.dueDate && !v.givenDate && new Date(v.dueDate) < new Date();
+                const isOverdue = v.due_date && !v.given_date && new Date(v.due_date) < new Date();
                 return (
                   <View key={i} style={styles.historyRow}>
                     <Ionicons
-                      name={v.givenDate ? 'checkmark-circle' : isOverdue ? 'alert-circle' : 'time-outline'}
+                      name={v.given_date ? 'checkmark-circle' : isOverdue ? 'alert-circle' : 'time-outline'}
                       size={16}
-                      color={v.givenDate ? Colors.success : isOverdue ? Colors.error : Colors.warning}
+                      color={v.given_date ? Colors.success : isOverdue ? Colors.error : Colors.warning}
                     />
                     <View style={{ flex: 1 }}>
-                      <Text style={styles.historyName}>{v.name}</Text>
+                      <Text style={styles.historyName}>{v.vaccine_name}</Text>
                       <Text style={styles.historyDate}>
-                        {v.givenDate ? `দেওয়া হয়েছে: ${v.givenDate}` : ''}
-                        {v.dueDate ? ` • পরবর্তী: ${v.dueDate}` : ''}
+                        {v.given_date ? `দেওয়া হয়েছে: ${v.given_date}` : ''}
+                        {v.due_date ? ` • পরবর্তী: ${v.due_date}` : ''}
                       </Text>
                     </View>
                     {isOverdue && <Text style={styles.overdueTag}>মেয়াদ শেষ</Text>}
@@ -278,8 +393,8 @@ function CowHealthCard({ cow, onAddVaccine, onAddMedicine, expanded, onToggle })
                 <View key={i} style={styles.historyRow}>
                   <Ionicons name="medkit-outline" size={16} color={Colors.error} />
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.historyName}>{m.reason}</Text>
-                    <Text style={styles.historyDate}>{m.date}</Text>
+                    <Text style={styles.historyName}>{m.medicine_name}</Text>
+                    <Text style={styles.historyDate}>{m.treatment_date}</Text>
                   </View>
                 </View>
               ))}
@@ -306,6 +421,7 @@ function CowHealthCard({ cow, onAddVaccine, onAddMedicine, expanded, onToggle })
 // ── Main Screen ────────────────────────────────────────────────────────────
 export default function HealthTrackScreen() {
   const router = useRouter();
+  const { farmId } = useLocalSearchParams();
   const [cows,        setCows]        = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [expandedId,  setExpandedId]  = useState(null);
@@ -324,111 +440,90 @@ export default function HealthTrackScreen() {
   // }, []);
   const loadCows = useCallback(async () => {
     try {
-      const MOCK_COWS = [
-        {
-          id: 'c1',
-          name: 'রানি',
-          breed: 'দেশি',
-          ageMonths: 36,
-          weightKg: 280,
-          healthScore: 82,
-          healthGrade: 'ভালো',
+      setLoading(true);
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        Alert.alert('ত্রুটি', 'অনুগ্রহ করে আগে লগইন করুন।');
+        setCows([]);
+        return;
+      }
 
-          healthDetails: {
-            vaccination: 25,
-            medicine: 18,
-            weight: 20,
-            age: 8,
-            feeding: 9,
-            expectedWeightKg: 300,
-          },
+      const userSnap = await getDocs(
+        query(collection(db, 'users'), where('firebase_uid', '==', currentUser.uid)),
+      );
+      const userDoc = userSnap.docs[0];
+      const userId = userDoc?.id || currentUser.uid;
+      const resolvedFarmId = Array.isArray(farmId) ? farmId[0] : farmId;
 
-          vaccines: [
-            {
-              name: 'FMD Vaccine',
-              givenDate: '2026-03-01',
-              dueDate: '2026-09-01',
-            },
-            {
-              name: 'HS Vaccine',
-              givenDate: null,
-              dueDate: '2026-03-20', // overdue
-            },
-          ],
+      const farmIds = resolvedFarmId
+        ? [String(resolvedFarmId)]
+        : (await getDocs(
+            query(collection(db, 'farms'), where('farmer_id', '==', userId)),
+          )).docs.map((doc) => doc.id);
 
-          medicines: [
-            { date: '2026-03-10', reason: 'জ্বর' },
-            { date: '2026-02-15', reason: 'পেটের সমস্যা' },
-          ],
-        },
+      if (farmIds.length === 0) {
+        setCows([]);
+        return;
+      }
 
-        {
-          id: 'c2',
-          name: 'মহেশ',
-          breed: 'শাহীওয়াল',
-          ageMonths: 48,
-          weightKg: 350,
-          healthScore: 90,
-          healthGrade: 'অসাধারণ',
+      const cowSnapshots = await Promise.all(
+        farmIds.map((farm) =>
+          getDocs(query(collection(db, 'cows'), where('farm_id', '==', farm))),
+        ),
+      );
 
-          healthDetails: {
-            vaccination: 30,
-            medicine: 22,
-            weight: 24,
-            age: 10,
-            feeding: 10,
-            expectedWeightKg: 360,
-          },
+      const cowsList = cowSnapshots.flatMap((snapshot) =>
+        snapshot.docs.map((doc) => normalizeCow({ id: doc.id, ...doc.data() })),
+      );
 
-          vaccines: [
-            {
-              name: 'FMD Vaccine',
-              givenDate: '2026-02-01',
-              dueDate: '2026-08-01',
-            },
-          ],
+      const cowsWithHealth = await Promise.all(
+        cowsList.map(async (cow) => {
+          const [vaccineSnap, medicineSnap] = await Promise.all([
+            getDocs(query(collection(db, 'vaccines'), where('cow_id', '==', cow.id))),
+            getDocs(query(collection(db, 'medicines'), where('cow_id', '==', cow.id))),
+          ]);
 
-          medicines: [],
-        },
+          const vaccines = vaccineSnap.docs
+            .map((doc) => normalizeVaccine({ id: doc.id, ...doc.data() }))
+            .sort((a, b) => {
+              const aTime = toDate(a.given_date || a.due_date)?.getTime() || 0;
+              const bTime = toDate(b.given_date || b.due_date)?.getTime() || 0;
+              return bTime - aTime;
+            });
 
-        {
-          id: 'c3',
-          name: 'বুলবুল',
-          breed: 'ফ্রিজিয়ান',
-          ageMonths: 24,
-          weightKg: 220,
-          healthScore: 58,
-          healthGrade: 'মোটামুটি',
+          const medicines = medicineSnap.docs
+            .map((doc) => normalizeMedicine({ id: doc.id, ...doc.data() }))
+            .sort((a, b) => {
+              const aTime = toDate(a.treatment_date)?.getTime() || 0;
+              const bTime = toDate(b.treatment_date)?.getTime() || 0;
+              return bTime - aTime;
+            });
 
-          healthDetails: {
-            vaccination: 15,
-            medicine: 12,
-            weight: 14,
-            age: 6,
-            feeding: 8,
-            expectedWeightKg: 260,
-          },
+          const health = getCowDetails(cow, vaccines, medicines);
 
-          vaccines: [],
+          return {
+            ...cow,
+            health_score: health.healthScore,
+            healthGrade: health.healthGrade,
+            healthDetails: health.healthDetails,
+            vaccines,
+            medicines,
+          };
+        }),
+      );
 
-          medicines: [
-            { date: '2026-04-01', reason: 'খাবার সমস্যা' },
-          ],
-        },
-      ];
-
-      setCows(MOCK_COWS);
-
+      setCows(cowsWithHealth);
     } catch (e) {
       console.error(e);
+      Alert.alert('ত্রুটি', 'স্বাস্থ্য তথ্য লোড করা যায়নি।');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [farmId]);
   useEffect(() => { loadCows(); }, [loadCows]);
 
   const avgScore = cows.length
-    ? Math.round(cows.reduce((s, c) => s + (c.healthScore || 0), 0) / cows.length)
+    ? Math.round(cows.reduce((s, c) => s + (c.health_score || 0), 0) / cows.length)
     : 0;
 
   const gradeCount = { অসাধারণ: 0, ভালো: 0, মোটামুটি: 0, দুর্বল: 0, খারাপ: 0 };
