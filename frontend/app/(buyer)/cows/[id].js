@@ -21,105 +21,6 @@ import { doc, getDoc } from 'firebase/firestore';
 import { auth, db, rtdb } from '../../../firebaseConfig';
 import { ref, push, set } from 'firebase/database';
 
-// (Legacy) Mock data - kept for reference; real data now loads from Firestore
-const MOCK_COWS = [
-  {
-    id: "c1",
-    name: "লক্ষ্মী",
-    breed: "দেশি",
-    ageMonths: 26,
-    weightKg: 315,
-    district: "রাজশাহী",
-    price: 145000,
-    gender: "female",
-    status: "available",
-    healthScore: 88,
-    healthGrade: "A",
-    photos: [],
-    description:
-      "একটি স্বাস্থ্যকর এবং উৎপাদনশীল দেশী গরু। দুধ উৎপাদন খুবই ভালো।",
-    vaccination: "সম্পূর্ণ",
-    lastHealthCheck: "2026-03-15",
-    _farmerName: "কৃষক রহিম",
-    _farmerPhone: "01700000001",
-  },
-  {
-    id: "c2",
-    name: "বাদশা",
-    breed: "শাহীওয়াল",
-    ageMonths: 32,
-    weightKg: 410,
-    district: "ঢাকা",
-    price: 210000,
-    gender: "male",
-    status: "available",
-    healthScore: 81,
-    healthGrade: "A-",
-    photos: [],
-    description: "খুবই শক্তিশালী ষাঁড়। চাষাবাদের কাজে অত্যন্ত উপযুক্ত।",
-    vaccination: "সম্পূর্ণ",
-    lastHealthCheck: "2026-03-20",
-    _farmerName: "কৃষক করিম",
-    _farmerPhone: "01700000002",
-  },
-  {
-    id: "c3",
-    name: "চাঁদনী",
-    breed: "ফ্রিজিয়ান",
-    ageMonths: 24,
-    weightKg: 360,
-    district: "কুমিল্লা",
-    price: 175000,
-    gender: "female",
-    status: "reserved",
-    healthScore: 74,
-    healthGrade: "B",
-    photos: [],
-    description: "বিদেশী জাতের উন্নত মানের গরু। উচ্চ দুধ উৎপাদনশীল।",
-    vaccination: "আংশিক",
-    lastHealthCheck: "2026-03-10",
-    _farmerName: "কৃষক হাসান",
-    _farmerPhone: "01700000003",
-  },
-  {
-    id: "c4",
-    name: "বিজয়",
-    breed: "ব্রাহমান",
-    ageMonths: 36,
-    weightKg: 460,
-    district: "নওগাঁ",
-    price: 255000,
-    gender: "male",
-    status: "available",
-    healthScore: 69,
-    healthGrade: "C+",
-    photos: [],
-    description: "বড় আকারের গোমাংস উৎপাদনের জন্য আদর্শ।",
-    vaccination: "সম্পূর্ণ",
-    lastHealthCheck: "2026-03-08",
-    _farmerName: "কৃষক আবু",
-    _farmerPhone: "01700000004",
-  },
-  {
-    id: "c5",
-    name: "নূর",
-    breed: "হরিয়ানা",
-    ageMonths: 28,
-    weightKg: 390,
-    district: "সিরাজগঞ্জ",
-    price: 198000,
-    gender: "female",
-    status: "reserved",
-    healthScore: 63,
-    healthGrade: "C",
-    photos: [],
-    description: "মাঝারি আকারের দুধ উৎপাদনকারী গরু।",
-    vaccination: "চলমান",
-    lastHealthCheck: "2026-02-28",
-    _farmerName: "কৃষক ফারিদ",
-    _farmerPhone: "01700000005",
-  },
-];
 
 // Normalize Firestore cow doc to UI shape
 const normalizeCow = (docOrData) => {
@@ -475,7 +376,7 @@ export default function CowDetailsScreen() {
               <Text style={styles.contactBtnText}>যোগাযোগ করুন</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.bookBtn} 
-              onPress={() => router.push(`./../orders/book`)}
+              onPress={() => router.push(`./../orders/book?cowId=${id}`)}
             >
               <Ionicons
                 name="checkmark-circle"

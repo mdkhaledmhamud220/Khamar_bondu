@@ -20,62 +20,15 @@ import {
     Shadow,
     Spacing,
 } from "../../../constants/theme";
-import { useAuth } from "../../../context/AuthContext";
+import {
+  collection,
+  getDocs,
+  orderBy,
+  query,
+  where,
+} from "firebase/firestore";
 
-const MOCK_COWS = [
-  {
-    id: "c1",
-    name: "লক্ষ্মী",
-    breed: "দেশি",
-    ageMonths: 26,
-    weightKg: 315,
-    district: "রাজশাহী",
-    price: 145000,
-    gender: "female",
-    order_status: "completed",
-    healthScore: 88,
-    healthGrade: "A",
-  },
-  {
-    id: "c2",
-    name: "বাদশা",
-    breed: "শাহীওয়াল",
-    ageMonths: 32,
-    weightKg: 410,
-    district: "ঢাকা",
-    price: 210000,
-    gender: "male",
-    order_status: "confirmed",
-    healthScore: 81,
-    healthGrade: "A-",
-  },
-  {
-    id: "c3",
-    name: "নূর",
-    breed: "হরিয়ানা",
-    ageMonths: 28,
-    weightKg: 390,
-    district: "সিরাজগঞ্জ",
-    price: 198000,
-    gender: "female",
-    order_status: "cancelled",
-    healthScore: 63,
-    healthGrade: "C",
-  },
-  {
-    id: "c4",
-    name: "কালো",
-    breed: "দেশি",
-    ageMonths: 20,
-    weightKg: 280,
-    district: "নাটোর",
-    price: 120000,
-    gender: "male",
-    order_status: "pending",
-    healthScore: 70,
-    healthGrade: "B",
-  },
-];
+import { auth, db } from "../../../firebaseConfig";
 
 const STATUS_TABS = [
   { key: "pending", label: "Pending" },
@@ -151,7 +104,7 @@ function CowCard({ cow, onPress }) {
           <HealthBadge score={cow.healthScore} grade={cow.healthGrade} />
         </View>
 
-        <Text style={styles.cowName}>{cow.name || `${cow.breed} গরু`}</Text>
+        <Text style={styles.cowName}>{cow.cowName}</Text>
 
         <View style={styles.cowDetails}>
           <View style={styles.detailChip}>
@@ -197,8 +150,6 @@ function CowCard({ cow, onPress }) {
 
 export default function myOrder() {
   const router = useRouter();
-  const auth = useAuth() || {};
-  const profile = auth.profile || { name: "করিম", role: "buyer" };
   const [cows, setCows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -209,22 +160,61 @@ export default function myOrder() {
 
   const fetchCows = useCallback(async () => {
     try {
+      setLoading(true);
       setError(null);
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      const data =
-        breed === "সব"
-          ? MOCK_COWS
-          : MOCK_COWS.filter((item) => item.breed === breed);
-      setCows(data);
+      
+      const user = auth.currentUser;
+      console.log("Current User:", auth.currentUser);
+      console.log("UID:", auth.currentUser?.uid);
+
+      if (!user) {
+        setError("Please login first.");
+        return;
+      }
+
+      const q = query(
+        collection(db, "orders"),
+        where("buyerId", "==", user.uid),
+        orderBy("createdAt", "desc")
+      );
+
+      const snap = await getDocs(q);
+
+      const orders = snap.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+
+        cowName: doc.data().name,
+        breed: doc.data().breed,
+        price: doc.data().price,
+        order_status: doc.data().status,
+        healthScore: doc.data().healthScore ?? 0,
+        healthGrade: doc.data().healthGrade ?? "-",
+        ageMonths: doc.data().ageMonths ?? 0,
+        weightKg: doc.data().weightKg ?? 0,
+        district: doc.data().district ?? "",
+        gender: doc.data().gender ?? "",
+        photos: doc.data().photos ?? [],
+      }));
+
+      setCows(orders);
+
     } catch (e) {
-      setError("গরুর তালিকা লোড করা যায়নি।");
+
+      console.log(e);
+
+      setError("অর্ডার লোড করা যায়নি।");
+
     } finally {
+
       setLoading(false);
       setRefreshing(false);
+
     }
   }, []);
 
-  useEffect(() => {
+  useEffect((cows) => {
+    console.log(cows)
     fetchCows();
   }, [fetchCows]);
 
@@ -257,7 +247,7 @@ export default function myOrder() {
         <View style={styles.headerTop}>
           <View>
             <Text style={styles.greeting}>{greeting()}, 👋</Text>
-            <Text style={styles.userName}>{profile?.name || "ক্রেতা"}</Text>
+            <Text style={styles.userName}>{ "ক্রেতা"}</Text>
           </View>
           <TouchableOpacity style={styles.notifBtn}>
             <Ionicons

@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Khama_bondhu",
-    "slug": "Khama_bondhu",
+    "slug": "khamar-bondu",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -9,7 +9,8 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.mdkhaledmhamud220steam.khamarbondu"
     },
     "android": {
       "adaptiveIcon": {
@@ -19,7 +20,8 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.mdkhaledmhamud220steam.khamarbondu"
     },
     "web": {
       "output": "static",
@@ -43,6 +45,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "44486edf-62ee-402e-bcd8-b8b93546f354"
+      }
+    },
+    "owner": "mdkhaledmhamud220s-team"
   }
 }
