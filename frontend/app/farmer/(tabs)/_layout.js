@@ -32,8 +32,19 @@ export default function BuyerTabLayout() {
       <Tabs.Screen
         name="chat"
         options={{
-          title: 'চ্যাট',
-          tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles" size={size} color={color} />,
+          title: "চ্যাট",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="chatbubbles" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="notification"
+        options={{
+          title: "নোটিফিকেশন",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="notifications" size={size} color={color} />
+          ),
         }}
       />
       <Tabs.Screen

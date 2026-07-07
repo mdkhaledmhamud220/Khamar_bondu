@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
 import {
   Alert,
@@ -16,6 +16,7 @@ import {
 import Button from "../../../components/Button";
 import Input from "../../../components/Input";
 // import api from '../../config/api';
+import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import {
   BorderRadius,
   Colors,
@@ -23,13 +24,21 @@ import {
   Shadow,
   Spacing,
 } from "../../../constants/theme";
-import {
-  addDoc,
-  collection,
-  serverTimestamp,
-} from "firebase/firestore";
 
 import { auth, db } from "../../../firebaseConfig";
+
+const DISTRICTS = [
+  "ঢাকা",
+  "চট্টগ্রাম",
+  "রাজশাহী",
+  "খুলনা",
+  "বরিশাল",
+  "সিলেট",
+  "রংপুর",
+  "ময়মনসিংহ",
+  "কুমিল্লা",
+  "গাজীপুর",
+];
 
 const BREEDS = [
   "দেশি",
@@ -71,7 +80,7 @@ export default function AddCowScreen() {
       e.weightKg = "সঠিক ওজন দিন";
     if (!price) e.price = "মূল্য লিখুন";
     else if (isNaN(price) || Number(price) <= 0) e.price = "সঠিক মূল্য দিন";
-    
+
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -86,7 +95,10 @@ export default function AddCowScreen() {
     }
 
     if (!farmId) {
-      Alert.alert("ত্রুটি", "কোনো খামার আইডি পাওয়া যায়নি। সঠিক খামার থেকে নতুন গরু যোগ করুন।");
+      Alert.alert(
+        "ত্রুটি",
+        "কোনো খামার আইডি পাওয়া যায়নি। সঠিক খামার থেকে নতুন গরু যোগ করুন।",
+      );
       return;
     }
 
@@ -98,8 +110,8 @@ export default function AddCowScreen() {
       // ২. COWS স্কিমা অনুযায়ী ফায়ারস্টোরের রুট কালেকশনে ডাটা সেভ করুন
       const cowsCollection = collection(db, "cows");
       const newCowRef = await addDoc(cowsCollection, {
-        farm_id: farmId,               // FK -> farms কালেকশনের ID
-        farmer_id: user.uid,           // রুট কুয়েরি সহজ করতে ফরেন কি
+        farm_id: farmId, // FK -> farms কালেকশনের ID
+        farmer_id: user.uid, // রুট কুয়েরি সহজ করতে ফরেন কি
         name: name.trim() || "নামহীন গরু",
         breed: breed,
         gender: gender,
@@ -108,11 +120,12 @@ export default function AddCowScreen() {
         price: Number(price),
         status: isForSale ? "available" : "draft", // বিক্রির জন্য হলে available, না হলে draft
         health_score: healthScore,
-        sale_price: null,
+        sale_price: Number(price),
         sale_date: null,
         description: description.trim(),
         regular_feeding: regularFeeding,
-        created_at: serverTimestamp()
+        district: district,
+        created_at: serverTimestamp(),
       });
 
       console.log("Firestore-এ গরু যোগ করা সফল হয়েছে!");
@@ -122,7 +135,10 @@ export default function AddCowScreen() {
           text: "দেখুন",
           onPress: () => router.replace(`/cows/${newCowRef.id}`),
         },
-        { text: "আরো যোগ করুন", onPress: () => router.replace(`/cows/add?farmId=${farmId}`) },
+        {
+          text: "আরো যোগ করুন",
+          onPress: () => router.replace(`/cows/add?farmId=${farmId}`),
+        },
       ]);
     } catch (err) {
       console.log(err);
@@ -254,8 +270,31 @@ export default function AddCowScreen() {
         </View>
 
         <View style={styles.card}>
-          <Text style={styles.sectionTitle}> বিবরণ</Text>
+          <Text style={styles.sectionTitle}>📍 অবস্থান ও বিবরণ</Text>
 
+          {/* District */}
+          <Text style={styles.fieldLabel}>জেলা *</Text>
+          {errors.district && (
+            <Text style={styles.errorText}>{errors.district}</Text>
+          )}
+          <View style={styles.chipRow}>
+            {DISTRICTS.map((d) => (
+              <TouchableOpacity
+                key={d}
+                style={[styles.chip, district === d && styles.chipActive]}
+                onPress={() => setDistrict(d)}
+              >
+                <Text
+                  style={[
+                    styles.chipText,
+                    district === d && styles.chipTextActive,
+                  ]}
+                >
+                  {d}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
           <Input
             label="বিবরণ (ঐচ্ছিক)"

@@ -301,7 +301,10 @@ export default function BuyerHomeScreen() {
             <Text style={styles.greeting}>{greeting()}, 👋</Text>
             <Text style={styles.userName}>{user.name || "ক্রেতা"}</Text>
           </View>
-          <TouchableOpacity style={styles.notifBtn}>
+          <TouchableOpacity
+            style={styles.notifBtn}
+            onPress={() => router.push("./notification")}
+          >
             <Ionicons
               name="notifications-outline"
               size={22}

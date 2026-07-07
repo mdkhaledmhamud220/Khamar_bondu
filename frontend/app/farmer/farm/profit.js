@@ -103,11 +103,7 @@ function CowProfitRow({ cow, onSell }) {
         <Text style={[styles.cowProfit, { color: profitColor }]}>
           {fmtS(profit)}
         </Text>
-        {!isSold && (
-          <TouchableOpacity style={styles.sellBtn} onPress={() => onSell(cow)}>
-            <Text style={styles.sellBtnText}>বিক্রি</Text>
-          </TouchableOpacity>
-        )}
+        
       </View>
     </View>
   );
@@ -162,7 +158,6 @@ export default function ProfitScreen() {
   const [cows, setCows] = useState([]);
   const [dashboard, setDashboard] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [sellingCow, setSellingCow] = useState(null);
   const { selectedFarm } = useFarm();
   const farmId = selectedFarm?.id;
 
@@ -315,27 +310,6 @@ export default function ProfitScreen() {
     }
   }, [farmId]);
 
-  const handleSellConfirm = (cowId, salePrice, buyerName) => {
-    const updated = cows.map((c) => {
-      if (c.id === cowId) {
-        const totalCost =
-          c.purchaseCost + c.feedCost + c.medicineCost + c.otherCost;
-        return {
-          ...c,
-          status: "sold",
-          salePrice,
-          profit: salePrice - totalCost,
-        };
-      }
-      return c;
-    });
-
-    setCows(updated);
-    setSellingCow(null);
-
-    Alert.alert("✅ বিক্রি সম্পন্ন", "Mock data আপডেট হয়েছে");
-  };
-
   const d = dashboard || {};
   const totalProfit = d.estimatedProfit || 0;
   const milkIncome = d.milkIncomeLastMonth || 0;
@@ -440,7 +414,7 @@ export default function ProfitScreen() {
                     <CowProfitRow
                       key={cow.id}
                       cow={cow}
-                      onSell={setSellingCow}
+                      
                     />
                   ))
                 )}
@@ -459,14 +433,6 @@ export default function ProfitScreen() {
         )}
       </ScrollView>
 
-      {/* Sell overlay */}
-      {sellingCow && (
-        <SellConfirmAlert
-          cow={sellingCow}
-          onConfirm={handleSellConfirm}
-          onCancel={() => setSellingCow(null)}
-        />
-      )}
     </View>
   );
 }
@@ -631,72 +597,4 @@ const styles = StyleSheet.create({
     color: Colors.textSecondary,
     lineHeight: 20,
   },
-
-  // Sell overlay
-  sellOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: Spacing.xl,
-  },
-  sellModal: {
-    backgroundColor: Colors.white,
-    borderRadius: BorderRadius.xl,
-    padding: Spacing.xl,
-    width: "100%",
-  },
-  sellModalTitle: {
-    fontSize: FontSize.xl,
-    fontWeight: "800",
-    color: Colors.textPrimary,
-    marginBottom: 4,
-  },
-  sellModalCow: {
-    fontSize: FontSize.md,
-    color: Colors.textMuted,
-    marginBottom: Spacing.lg,
-  },
-  sellFieldLabel: {
-    fontSize: FontSize.sm,
-    fontWeight: "600",
-    color: Colors.textSecondary,
-    marginBottom: 6,
-    marginTop: Spacing.sm,
-  },
-  sellInput: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md,
-    height: 48,
-    marginBottom: 4,
-  },
-  sellInputText: { flex: 1, fontSize: FontSize.md, color: Colors.textPrimary },
-  sellBtnRow: { flexDirection: "row", gap: Spacing.md, marginTop: Spacing.lg },
-  sellCancelBtn: {
-    flex: 1,
-    height: 48,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1.5,
-    borderColor: Colors.border,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sellCancelText: { color: Colors.textSecondary, fontWeight: "600" },
-  sellConfirmBtn: {
-    flex: 2,
-    height: 48,
-    borderRadius: BorderRadius.md,
-    backgroundColor: Colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sellConfirmText: { color: Colors.white, fontWeight: "700" },
 });

@@ -19,7 +19,6 @@ export default function BuyerTabLayout() {
         tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
         headerShown: false,
       }}
-      
     >
       <Tabs.Screen
         name="home"
@@ -45,6 +44,15 @@ export default function BuyerTabLayout() {
           title: "আমার অর্ডার",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="cart" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="notification"
+        options={{
+          title: "নোটিফিকেশন",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="notifications" size={size} color={color} />
           ),
         }}
       />

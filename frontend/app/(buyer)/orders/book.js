@@ -15,9 +15,9 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-// import { useAuth } from '../../context/AuthContext';
-// import api from '../../config/api';
+import { createNotification } from "../../../services/notificationService";
 import {
+  addDoc,
   collection,
   doc,
   getDoc,
@@ -354,6 +354,8 @@ export default function BookingScreen() {
       const cowRef = doc(db, "cows", cow.id);
 
       let bookingCode = "";
+      let farmId = "";
+      let cowName = "";
 
       await runTransaction(db, async (transaction) => {
         const cowSnap = await transaction.get(cowRef);
@@ -363,6 +365,9 @@ export default function BookingScreen() {
         }
 
         const cowData = cowSnap.data();
+
+        farmId = cowData.farm_id;
+        cowName = cowData.name;
 
         // শুধু available থাকলেই বুক করা যাবে
         if (cowData.status !== "available") {
@@ -382,14 +387,13 @@ export default function BookingScreen() {
           breed: cowData.breed,
           price: cowData.sale_price,
           gender: cowData.gender,
-          district: 'dhaka',
+          district: cowData.district,
           ageMonths: cowData.age_months,
           weightKg: cowData.weight_kg,
           healthScore: cowData.health_score,
-      
-         
           status: "pending",
           deliveryDate,
+          deliveryAddress: deliveryAddr,
           paymentMethod: payMethod,
           note,
           createdAt: serverTimestamp(),
@@ -402,6 +406,20 @@ export default function BookingScreen() {
           orderId: orderRef.id,
           bookingCode,
         });
+      });
+
+      await createNotification({
+        audience: "farm",
+        ownerId: farmId, // নিচে দেখো
+        type: "booking",
+        title: "নতুন বুকিং এসেছে",
+        body: `${cowName} গরুর জন্য একটি নতুন বুকিং এসেছে।`,
+        data: {
+          orderId: orderRef.id,
+          cowId: cow.id,
+          buyerId: user.uid,
+          bookingCode,
+        },
       });
 
       setOrderId(bookingCode);
@@ -425,18 +443,6 @@ export default function BookingScreen() {
       </View>
     );
   }
-
-  // if (!cowId) {
-  //   return (
-  //     <View style={styles.center}>
-  //       <Text style={styles.errorEmoji}>😕</Text>
-  //       <Text style={styles.errorText}>গরুর তথ্য পাওয়া যায়নি।</Text>
-  //       <TouchableOpacity style={styles.retryBtn} onPress={() => router.back()}>
-  //         <Text style={styles.retryText}>ফিরে যান</Text>
-  //       </TouchableOpacity>
-  //     </View>
-  //   );
-  // }
 
   return (
     <KeyboardAvoidingView

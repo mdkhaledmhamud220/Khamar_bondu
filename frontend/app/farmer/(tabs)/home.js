@@ -218,7 +218,10 @@ export default function FarmDashboard() {
           >
             <Ionicons name="arrow-back" size={22} color={Colors.white} />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.notifBtn}>
+          <TouchableOpacity
+            style={styles.notifBtn}
+            onPress={() => router.push('./notification')}
+          >
             <Ionicons
               name="notifications-outline"
               size={22}
