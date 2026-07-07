@@ -124,10 +124,10 @@ export default function FarmDashboard() {
         const totalCows = cowsList.length;
 
         const availableCows = cowsList.filter(
-          (c) => c.status === "available",
+          (c) => c.status === "available" || c.status === "booked",
         ).length;
 
-        const soldCows = cowsList.filter((c) => c.status === "booked").length;
+        const soldCows = cowsList.filter((c) => c.status === "sold").length;
 
         let totalInvestment = 0;
         let totalExpectedValue = 0;

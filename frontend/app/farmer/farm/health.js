@@ -697,7 +697,7 @@ export default function HealthTrackScreen() {
         }),
       );
 
-      setCows(cowsWithHealth);
+      setCows(cowsWithHealth.filter((cow) => cow.status !== "sold"));
     } catch (e) {
       console.error(e);
       Alert.alert("ত্রুটি", "স্বাস্থ্য তথ্য লোড করা যায়নি।");

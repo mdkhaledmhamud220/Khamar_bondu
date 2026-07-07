@@ -344,7 +344,7 @@ export default function FarmerHomeScreen() {
         }),
       );
 
-      setMyCows(cowsWithMilkStats);
+      setMyCows(cowsWithMilkStats.filter((cow) => cow.status !== "sold"));
     } catch (e) {
       console.log(e);
       setError("আপনার গরুর তালিকা লোড করা যায়নি।");

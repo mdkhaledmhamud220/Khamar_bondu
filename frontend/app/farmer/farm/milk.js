@@ -338,7 +338,7 @@ export default function MilkLogScreen() {
         snapshot.docs.map((doc) => normalizeCow({ id: doc.id, ...doc.data() })),
       );
 
-      setCows(cowsList);
+      setCows(cowsList.filter((cow) => cow.status !== "sold" && cow.gender === "female"));
 
       const logSnapshots = await Promise.all(
         cowsList.map(async (cow) => {
