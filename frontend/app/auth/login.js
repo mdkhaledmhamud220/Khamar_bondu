@@ -99,25 +99,6 @@ export default function LoginScreen() {
     }
   };
 
-  const handleForgotPassword = async () => {
-    if (!email.trim()) {
-      Alert.alert("ইমেইল দিন", "পাসওয়ার্ড রিসেটের জন্য আগে ইমেইল লিখুন।");
-      return;
-    }
-    try {
-      await sendPasswordResetEmail(auth, email.trim());
-      Alert.alert(
-        "✉️ ইমেইল পাঠানো হয়েছে",
-        "পাসওয়ার্ড রিসেটের লিংক আপনার ইমেইলে পাঠানো হয়েছে।",
-      );
-    } catch {
-      Alert.alert(
-        "সমস্যা হয়েছে",
-        "ইমেইল পাঠানো যায়নি। ইমেইল ঠিকানা যাচাই করুন।",
-      );
-    }
-  };
-
   return (
     <KeyboardAvoidingView
       style={styles.flex}
@@ -179,7 +160,7 @@ export default function LoginScreen() {
             />
 
             <TouchableOpacity
-              onPress={handleForgotPassword}
+              onPress={()=> router.push(`./resetPassword?role=${role}`)}
               style={styles.forgotBtn}
             >
               <Text style={styles.forgotText}>পাসওয়ার্ড ভুলে গেছেন?</Text>

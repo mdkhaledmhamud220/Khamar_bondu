@@ -90,7 +90,6 @@ export default function RegisterScreen() {
         password,
       );
       await updateProfile(cred.user, { displayName: name.trim() });
-      await sendEmailVerification(cred.user);
 
       // ২. USERS স্কিমা অনুযায়ী Firestore-এ ডাটা সংরক্ষণ
       await setDoc(doc(db, "users", cred.user.uid), {
@@ -114,7 +113,7 @@ export default function RegisterScreen() {
         [
           {
             text: "ঠিক আছে",
-            onPress: () => router.replace(`./login?role=${role}`),
+            onPress: () => router.replace(`./verifyEmail?role=${role}`),
           },
         ],
       );
