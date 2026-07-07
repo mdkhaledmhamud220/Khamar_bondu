@@ -1,10 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import { useRouter, useLocalSearchParams} from "expo-router";
-import { useFarm } from "../../../context/FarmContext"
+import { useRouter } from "expo-router";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  Alert,
   ScrollView,
   StyleSheet,
   Text,
@@ -18,8 +19,39 @@ import {
   Shadow,
   Spacing,
 } from "../../../constants/theme";
-import { collection, query, where, getDocs } from "firebase/firestore";
+import { useFarm } from "../../../context/FarmContext";
 import { auth, db } from "../../../firebaseConfig";
+
+const toNumber = (value) => Number(value) || 0;
+
+const toDate = (value) => {
+  if (!value) return null;
+  if (value?.toDate) return value.toDate();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const normalizeCost = (data) => ({
+  id: data.id,
+  cow_id: data.cow_id,
+  type: data.type,
+  amount: toNumber(data.amount),
+  cost_date: toDate(data.cost_date),
+  note: data.note || "",
+});
+
+const normalizeMilkLog = (doc) => ({
+  id: doc.id,
+  ...doc,
+  cow_id: doc.cow_id ?? doc.cowId ?? null,
+  log_date: doc.log_date ?? doc.logDate ?? null,
+  morning_liters: toNumber(doc.morning_liters ?? doc.morningLiters),
+  evening_liters: toNumber(doc.evening_liters ?? doc.eveningLiters),
+  total_liters: toNumber(doc.total_liters ?? doc.totalLiters),
+  sold_liters: toNumber(doc.sold_liters ?? doc.soldLiters),
+  price_per_liter: toNumber(doc.price_per_liter ?? doc.pricePerLiter),
+  income: toNumber(doc.income),
+});
 
 function StatCard({ icon, label, value, color, onPress }) {
   return (
@@ -46,16 +78,9 @@ export default function FarmDashboard() {
   const router = useRouter();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  
+
   const { selectedFarm } = useFarm();
   const farmId = selectedFarm?.id;
-
-  // useEffect(() => {
-  //   api.get('/farm/dashboard')
-  //     .then(r => setData(r.data.data))
-  //     .catch(() => {})
-  //     .finally(() => setLoading(false));
-  // }, []);
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -64,52 +89,87 @@ export default function FarmDashboard() {
         const user = auth.currentUser;
         if (!user) return;
 
-        // ১. খামারির সমস্ত গরুর তালিকা রুট কালেকশন থেকে কুয়েরি করুন
-        const cowsRef = collection(db, "cows");
-        const q = query(cowsRef, where("farm_id", "==", farmId));
-        const snapshot = await getDocs(q);
+        // ১. সকল গরু
+        const cowsSnap = await getDocs(
+          query(collection(db, "cows"), where("farm_id", "==", farmId)),
+        );
 
-        const cowsList = snapshot.docs.map((doc) => ({
+        const cowsList = cowsSnap.docs.map((doc) => ({
           id: doc.id,
           ...doc.data(),
         }));
 
-        // ২. ক্লায়েন্ট সাইডে স্ট্যাটাস ফিল্টার করুন (এতে রিড রিকোয়েস্ট বাঁচে)
+        // ২. একবারে সব costs
+        const costsSnap = await getDocs(collection(db, "costs"));
+
+        const allCosts = costsSnap.docs.map((doc) =>
+          normalizeCost({
+            id: doc.id,
+            ...doc.data(),
+          }),
+        );
+
+        // ৩. একবারে সব milk logs
+        const milkSnap = await getDocs(collection(db, "milk_logs"));
+
+        const allMilkLogs = milkSnap.docs.map((doc) =>
+          normalizeMilkLog({
+            id: doc.id,
+            ...doc.data(),
+          }),
+        );
+
+        //--------------------------------------------
+
         const totalCows = cowsList.length;
-        const availableCows = cowsList.filter((c) => c.status === "available").length;
-        const soldCows = cowsList.filter((c) => c.status === "sold").length;
 
-        // ৩. বিনিয়োগ (Investment) এবং আনুমানিক মূল্য হিসাব করুন
-        // ধরি, প্রতিটি গরুর 'price' হলো ক্রয়মূল্য বা বেস ইনভেস্টমেন্ট
-        const totalInvestment = cowsList.reduce((sum, c) => sum + (Number(c.price) || 0), 0);
+        const availableCows = cowsList.filter(
+          (c) => c.status === "available",
+        ).length;
 
-        // অবিক্রীত গরুর ক্ষেত্রে 'price' এবং বিক্রীত গরুর ক্ষেত্রে 'sale_price' হলো প্রাপ্ত/আনুমানিক মূল্য
-        const totalExpectedValue = cowsList.reduce((sum, c) => {
-          const val = c.status === "sold" ? (Number(c.sale_price) || 0) : (Number(c.price) || 0);
-          return sum + val;
-        }, 0);
+        const soldCows = cowsList.filter((c) => c.status === "booked").length;
 
-        const estimatedProfit = totalExpectedValue - totalInvestment;
-
-        // ৪. বিগত ৩০ দিনের দুধের আয় হিসাব করুন (সাব-কালেকশন থেকে)
+        let totalInvestment = 0;
+        let totalExpectedValue = 0;
         let milkIncomeLastMonth = 0;
+
         const thirtyDaysAgo = new Date();
         thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
 
-        for (const cow of cowsList) {
-          const milkLogsRef = collection(db, "cows", cow.id, "milk_logs");
-          const milkLogsSnap = await getDocs(milkLogsRef);
+        //--------------------------------------------
 
-          milkLogsSnap.forEach((doc) => {
-            const log = doc.data();
-            const logDate = log.log_date ? new Date(log.log_date) : null;
+        for (const cow of cowsList) {
+          // Purchase Price
+          let totalCost = Number(cow.price || 0);
+
+          // সব cost এর মধ্যে এই cow এর cost
+          const cowCosts = allCosts.filter((cost) => cost.cow_id === cow.id);
+
+          cowCosts.forEach((cost) => {
+            totalCost += cost.amount;
+          });
+
+          totalInvestment += totalCost;
+
+          // Expected Sale Price
+          totalExpectedValue += Number(cow.sale_price || cow.price || 0);
+
+          // Last 30 days milk income
+          const cowLogs = allMilkLogs.filter((log) => log.cow_id === cow.id);
+
+          cowLogs.forEach((log) => {
+            const logDate = toDate(log.log_date);
+
             if (logDate && logDate >= thirtyDaysAgo) {
-              milkIncomeLastMonth += Number(log.income) || 0;
+              milkIncomeLastMonth += Number(log.income || 0);
             }
           });
         }
 
-        // ৫. সংগৃহীত ডাটা স্টেটে সেট করুন
+        //--------------------------------------------
+
+        const estimatedProfit = totalExpectedValue - totalInvestment;
+
         setData({
           totalCows,
           availableCows,
@@ -129,7 +189,6 @@ export default function FarmDashboard() {
 
     fetchDashboardData();
   }, []);
-
 
   const fmt = (n) => `৳ ${(n || 0).toLocaleString("bn-BD")}`;
 
@@ -152,9 +211,22 @@ export default function FarmDashboard() {
         end={{ x: 1, y: 1 }}
       >
         <View style={styles.circle1} />
-        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={22} color={Colors.white} />
-        </TouchableOpacity>
+        <View style={styles.headerTop}>
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={() => router.back()}
+          >
+            <Ionicons name="arrow-back" size={22} color={Colors.white} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.notifBtn}>
+            <Ionicons
+              name="notifications-outline"
+              size={22}
+              color={Colors.white}
+            />
+            <View style={styles.notifDot} />
+          </TouchableOpacity>
+        </View>
         <Text style={styles.headerTitle}>আমার খামার</Text>
         <Text style={styles.headerSub}>সার্বিক অবস্থা</Text>
 
@@ -299,6 +371,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingBottom: 32,
     overflow: "hidden",
+  },
+  headerTop: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: Spacing.lg,
+  },
+  notifBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  notifDot: {
+    position: "absolute",
+    top: 8,
+    right: 8,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.warning,
   },
   circle1: {
     position: "absolute",

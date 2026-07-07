@@ -1,36 +1,36 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import {
-    ActivityIndicator,
-    Alert,
-    Image,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
-} from "react-native";
-import { useCallback, useEffect, useState } from "react";
-import { collection, getDocs, query, where } from "firebase/firestore";
 import { signOut } from "firebase/auth";
-import { auth, db } from "../../../firebaseConfig";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { useCallback, useEffect, useState } from "react";
 import {
-    BorderRadius,
-    Colors,
-    FontSize,
-    Shadow,
-    Spacing,
+  ActivityIndicator,
+  Alert,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import {
+  BorderRadius,
+  Colors,
+  FontSize,
+  Shadow,
+  Spacing,
 } from "../../../constants/theme";
+import { auth, db } from "../../../firebaseConfig";
 
 // ── Normalization helpers ─────────────────────────────────────────────────
 const normalizeUser = (data) => ({
   id: data.id,
   firebase_uid: data.firebase_uid,
-  name: data.name || '',
-  email: data.email || '',
-  phone: data.phone || '',
-  role: data.role || 'farmer',
+  name: data.name || "",
+  email: data.email || "",
+  phone: data.phone || "",
+  role: data.role || "farmer",
   profile_photo: data.profile_photo || null,
   is_verified: data.is_verified,
   created_at: data.created_at,
@@ -73,17 +73,20 @@ export default function FarmerProfileScreen() {
       setLoading(true);
       const currentUser = auth.currentUser;
       if (!currentUser) {
-        Alert.alert('ত্রুটি', 'লগইন করুন');
+        Alert.alert("ত্রুটি", "লগইন করুন");
         return;
       }
 
       // Get user document from Firestore by firebase_uid
       const usersSnap = await getDocs(
-        query(collection(db, 'users'), where('firebase_uid', '==', currentUser.uid))
+        query(
+          collection(db, "users"),
+          where("firebase_uid", "==", currentUser.uid),
+        ),
       );
 
       if (usersSnap.empty) {
-        Alert.alert('ত্রুটি', 'ব্যবহারকারী তথ্য পাওয়া যায়নি');
+        Alert.alert("ত্রুটি", "ব্যবহারকারী তথ্য পাওয়া যায়নি");
         setUser(null);
         return;
       }
@@ -91,10 +94,8 @@ export default function FarmerProfileScreen() {
       const userDoc = usersSnap.docs[0];
       const userData = normalizeUser({ id: userDoc.id, ...userDoc.data() });
       setUser(userData);
-
-      
     } catch (err) {
-      console.error('Error loading user data:', err);
+      console.error("Error loading user data:", err);
       setUser(null);
     } finally {
       setLoading(false);
@@ -117,7 +118,7 @@ export default function FarmerProfileScreen() {
             router.dismissAll();
             router.replace("./../../");
           } catch (err) {
-            console.error('Logout error:', err);
+            console.error("Logout error:", err);
             Alert.alert("সমস্যা হয়েছে", "লগআউট করা যায়নি।");
           }
         },
@@ -157,10 +158,7 @@ export default function FarmerProfileScreen() {
         <View style={styles.circle1} />
         <View style={styles.avatarWrap}>
           {user?.profile_photo ? (
-            <Image
-              source={{ uri: user.profile_photo }}
-              style={styles.avatar}
-            />
+            <Image source={{ uri: user.profile_photo }} style={styles.avatar} />
           ) : (
             <View style={styles.avatarFallback}>
               <Text style={styles.avatarInitial}>
@@ -177,7 +175,7 @@ export default function FarmerProfileScreen() {
         <Text style={styles.name}>{user?.name || "ব্যবহারকারী"}</Text>
         <Text style={styles.email}>{user?.email}</Text>
         <View style={styles.roleBadge}>
-          <Text style={styles.roleText}>🧑‍🌾 কৃষক</Text>
+          <Text style={styles.roleText}>🧑‍🌾 কৃষক </Text>
         </View>
         {console.log(user?.is_verified)}
         {user?.is_verified && (
@@ -329,6 +327,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.15)",
     paddingHorizontal: Spacing.md,
     paddingVertical: 5,
+    paddingHorizontal: 20,
     borderRadius: BorderRadius.full,
     marginBottom: 8,
   },

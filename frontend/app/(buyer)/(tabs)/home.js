@@ -1,28 +1,34 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+} from "firebase/firestore";
 import { useCallback, useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    Image,
-    RefreshControl,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList,
+  Image,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import {
-    BorderRadius,
-    Colors,
-    FontSize,
-    Shadow,
-    Spacing,
+  BorderRadius,
+  Colors,
+  FontSize,
+  Shadow,
+  Spacing,
 } from "../../../constants/theme";
-import { useAuth } from "../../../context/AuthContext";
-import { collection, getDocs, query, where, doc, getDoc } from 'firebase/firestore';
-import { auth, db } from '../../../firebaseConfig';
+import { auth, db } from "../../../firebaseConfig";
 
 // Normalize Firestore cow doc to UI shape
 const normalizeCow = (doc) => {
@@ -30,19 +36,32 @@ const normalizeCow = (doc) => {
   return {
     farm_id: d.farm_id || null,
     id: doc.id || d.id,
-    name: d.name || d.breed || 'গরু',
-    breed: d.breed || 'অন্যান্য',
+    name: d.name || d.breed || "গরু",
+    breed: d.breed || "অন্যান্য",
     ageMonths: d.age_months || d.ageMonths || 0,
     weightKg: d.weight_kg || d.weightKg || 0,
-    district: d.district || d.location || 'অজানা',
+    district: d.district || d.location || "অজানা",
     price: d.sale_price || 0,
-    gender: d.gender || 'female',
-    status: d.status || 'available',
+    gender: d.gender || "female",
+    status: d.status || "available",
     healthScore: d.health_score || d.healthScore || 0,
-    healthGrade: d.health_grade || d.healthGrade || '—',
+    healthGrade: d.health_grade || d.healthGrade || "—",
     photos: d.photos || d.photo_urls || [],
   };
 };
+
+// ── Normalization helpers ─────────────────────────────────────────────────
+const normalizeUser = (data) => ({
+  id: data.id,
+  firebase_uid: data.firebase_uid,
+  name: data.name || "",
+  email: data.email || "",
+  phone: data.phone || "",
+  role: data.role || "farmer",
+  profile_photo: data.profile_photo || null,
+  is_verified: data.is_verified,
+  created_at: data.created_at,
+});
 
 const BREEDS = [
   "সব",
@@ -51,79 +70,6 @@ const BREEDS = [
   "ফ্রিজিয়ান",
   "ব্রাহমান",
   "হরিয়ানা",
-];
-
-const MOCK_COWS = [
-  {
-    id: "c1",
-    name: "লক্ষ্মী",
-    breed: "দেশি",
-    ageMonths: 26,
-    weightKg: 315,
-    district: "রাজশাহী",
-    price: 145000,
-    gender: "female",
-    status: "available",
-    healthScore: 88,
-    healthGrade: "A",
-    photos: [],
-  },
-  {
-    id: "c2",
-    name: "বাদশা",
-    breed: "শাহীওয়াল",
-    ageMonths: 32,
-    weightKg: 410,
-    district: "ঢাকা",
-    price: 210000,
-    gender: "male",
-    status: "available",
-    healthScore: 81,
-    healthGrade: "A-",
-    photos: [],
-  },
-  {
-    id: "c3",
-    name: "চাঁদনী",
-    breed: "ফ্রিজিয়ান",
-    ageMonths: 24,
-    weightKg: 360,
-    district: "কুমিল্লা",
-    price: 175000,
-    gender: "female",
-    status: "reserved",
-    healthScore: 74,
-    healthGrade: "B",
-    photos: [],
-  },
-  {
-    id: "c4",
-    name: "বিজয়",
-    breed: "ব্রাহমান",
-    ageMonths: 36,
-    weightKg: 460,
-    district: "নওগাঁ",
-    price: 255000,
-    gender: "male",
-    status: "available",
-    healthScore: 69,
-    healthGrade: "C+",
-    photos: [],
-  },
-  {
-    id: "c5",
-    name: "নূর",
-    breed: "হরিয়ানা",
-    ageMonths: 28,
-    weightKg: 390,
-    district: "সিরাজগঞ্জ",
-    price: 198000,
-    gender: "female",
-    status: "reserved",
-    healthScore: 63,
-    healthGrade: "C",
-    photos: [],
-  },
 ];
 
 function HealthBadge({ score, grade }) {
@@ -236,9 +182,8 @@ function CowCard({ cow, onPress }) {
 
 export default function BuyerHomeScreen() {
   const router = useRouter();
-  const auth = useAuth() || {};
-  const profile = auth.profile || { name: "করিম", role: "buyer" };
   const [cows, setCows] = useState([]);
+  const [user, setUser] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [search, setSearch] = useState("");
@@ -252,25 +197,28 @@ export default function BuyerHomeScreen() {
       await new Promise((resolve) => setTimeout(resolve, 200));
       // build query: only available cows, optionally filter by breed
       const constraints = [where("status", "==", "available")];
-      if (breed && breed !== "সব") constraints.push(where("breed", "==", breed));
+      if (breed && breed !== "সব")
+        constraints.push(where("breed", "==", breed));
       const q = query(collection(db, "cows"), ...constraints);
       const snap = await getDocs(q);
       const cows = snap.docs.map((doc) => normalizeCow(doc));
-      const items = await Promise.all(cows.map(async (cow) => {
-        let district = "অজানা";
-        const farmRef = doc(db, "farms", cow.farm_id);
-      
-        const farmSnap = await getDoc(farmRef);
-        if (cow.farm_id) {
-          if (farmSnap.exists()) {
-            district = farmSnap.data().district || "অজানা";
+      const items = await Promise.all(
+        cows.map(async (cow) => {
+          let district = "অজানা";
+          const farmRef = doc(db, "farms", cow.farm_id);
+
+          const farmSnap = await getDoc(farmRef);
+          if (cow.farm_id) {
+            if (farmSnap.exists()) {
+              district = farmSnap.data().district || "অজানা";
+            }
           }
-        }
-        return {
-          ...cow,
-          district
-        };
-      }));
+          return {
+            ...cow,
+            district,
+          };
+        }),
+      );
 
       setCows(items);
     } catch (e) {
@@ -284,6 +232,44 @@ export default function BuyerHomeScreen() {
   useEffect(() => {
     fetchCows();
   }, [fetchCows]);
+
+  const loadUserData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const currentUser = auth.currentUser;
+      console.log(currentUser.uid);
+      if (!currentUser) {
+        Alert.alert("ত্রুটি", "লগইন করুন");
+        return;
+      }
+      // Get user document from Firestore by firebase_uid
+      const usersSnap = await getDocs(
+        query(
+          collection(db, "users"),
+          where("firebase_uid", "==", currentUser.uid),
+        ),
+      );
+
+      if (usersSnap.empty) {
+        Alert.alert("ত্রুটি", "ব্যবহারকারী তথ্য পাওয়া যায়নি");
+        setUser(null);
+        return;
+      }
+
+      const userDoc = usersSnap.docs[0];
+      const userData = normalizeUser({ id: userDoc.id, ...userDoc.data() });
+      setUser(userData);
+    } catch (err) {
+      console.error("Error loading user data:", err);
+      setUser(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadUserData();
+  }, [loadUserData]);
 
   const filteredCows = cows.filter(
     (c) =>
@@ -313,7 +299,7 @@ export default function BuyerHomeScreen() {
         <View style={styles.headerTop}>
           <View>
             <Text style={styles.greeting}>{greeting()}, 👋</Text>
-            <Text style={styles.userName}>{profile?.name || "ক্রেতা"}</Text>
+            <Text style={styles.userName}>{user.name || "ক্রেতা"}</Text>
           </View>
           <TouchableOpacity style={styles.notifBtn}>
             <Ionicons

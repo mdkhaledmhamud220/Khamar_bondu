@@ -1,26 +1,25 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { get, push, ref, set } from "firebase/database";
+import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    Image,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import {
-    BorderRadius,
-    Colors,
-    FontSize,
-    Shadow,
-    Spacing,
+  BorderRadius,
+  Colors,
+  FontSize,
+  Shadow,
+  Spacing,
 } from "../../../constants/theme";
-import { doc, getDoc } from 'firebase/firestore';
-import { auth, db, rtdb } from '../../../firebaseConfig';
-import { ref, push, set } from 'firebase/database';
-
+import { auth, db, rtdb } from "../../../firebaseConfig";
 
 // Normalize Firestore cow doc to UI shape
 const normalizeCow = (docOrData) => {
@@ -29,21 +28,21 @@ const normalizeCow = (docOrData) => {
   return {
     id: docOrData.id || d.id,
     farm_id: d.farm_id,
-    farmer_id : d.farmer_id,
-    name: d.name || d.breed || 'গরু',
-    breed: d.breed || 'অন্যান্য',
+    farmer_id: d.farmer_id,
+    name: d.name || d.breed || "গরু",
+    breed: d.breed || "অন্যান্য",
     ageMonths: d.age_months || d.ageMonths || 0,
     weightKg: d.weight_kg || d.weightKg || 0,
     price: d.sale_price || 0,
-    gender: d.gender || 'female',
-    status: d.status || 'available',
+    gender: d.gender || "female",
+    status: d.status || "available",
     healthScore: d.health_score || 0,
-    description: d.description || d.desc || '',
+    description: d.description || d.desc || "",
     // //
     photos: d.photos || d.photo_urls || [],
-    healthGrade: d.health_grade || d.healthGrade || '—',
-    vaccination: d.vaccination || d.vaccines || d.vaccinated || 'অজানা',
-    lastHealthCheck: d.last_health_check || d.lastHealthCheck || '',
+    healthGrade: d.health_grade || d.healthGrade || "—",
+    vaccination: d.vaccination || d.vaccines || d.vaccinated || "অজানা",
+    lastHealthCheck: d.last_health_check || d.lastHealthCheck || "",
   };
 };
 
@@ -52,8 +51,8 @@ const normalizeFarmer = (docOrData) => {
   const d = docOrData && docOrData.data ? docOrData.data() : docOrData;
   if (!d) return null;
   return {
-    sellerName: d.name || '',
-    sellerPhone: d.phone || d.phone_number || '',
+    sellerName: d.name || "",
+    sellerPhone: d.phone || d.phone_number || "",
   };
 };
 
@@ -80,18 +79,44 @@ export default function CowDetailsScreen() {
 
   const createConversation = async (farmerUid, cowId) => {
     const buyerUid = auth.currentUser?.uid;
+
     if (!buyerUid || !farmerUid || !cowId) {
-      throw new Error('conversation data missing');
+      throw new Error("conversation data missing");
     }
 
-    const convRef = push(ref(rtdb, 'conversations'));
+    // সব conversation আনো
+    const snap = await get(ref(rtdb, "conversations"));
+
+    if (snap.exists()) {
+      const conversations = snap.val();
+
+      for (const [id, conv] of Object.entries(conversations)) {
+        const participants = conv.participants || [];
+
+        const hasBuyer = participants.includes(buyerUid);
+        const hasFarmer = participants.includes(farmerUid);
+        const sameCow = conv.cowId === cowId;
+
+        if (hasBuyer && hasFarmer && sameCow) {
+          // আগের conversation আছে
+          return id;
+        }
+      }
+    }
+
+    // না থাকলে নতুন conversation তৈরি
+    const convRef = push(ref(rtdb, "conversations"));
+
     await set(convRef, {
       participants: [buyerUid, farmerUid],
       cowId,
-      last_message: '',
-      last_sender: '',
+
+      last_message: "",
+      last_message_at: "",
+      last_sender: "",
       updated_at: new Date().toISOString(),
     });
+
     return convRef.key;
   };
 
@@ -112,9 +137,9 @@ export default function CowDetailsScreen() {
         }
         const normalized = normalizeCow(snap);
         const farmer_id = normalized.farmer_id;
-        
+
         // Load farmer info if farmer_id exists
-        let farmerData = { sellerName: '', sellerPhone: '', district: ''};
+        let farmerData = { sellerName: "", sellerPhone: "", district: "" };
         if (farmer_id) {
           const ref_farmer = doc(db, "users", farmer_id);
           const snap_farmer = await getDoc(ref_farmer);
@@ -122,16 +147,16 @@ export default function CowDetailsScreen() {
             farmerData = normalizeFarmer(snap_farmer);
           }
         }
-        if(normalized.farm_id){
+        if (normalized.farm_id) {
           const ref_farm = doc(db, "farms", normalized.farm_id);
           const snap_farm = await getDoc(ref_farm);
           farmerData.district = snap_farm.data().district;
         }
-        
+
         // Merge cow data with farmer data
         setCow({
           ...normalized,
-          ...farmerData
+          ...farmerData,
         });
       } catch (e) {
         setError("তথ্য লোড করতে সমস্যা হয়েছে।");
@@ -292,16 +317,16 @@ export default function CowDetailsScreen() {
             />
             <View style={styles.divider} />
             <DetailRow
-                  onPress={async () => {
-                    try {
-                      const farmerUid = cow.farmer_id || cow.farmerId;
-                      const convId = await createConversation(farmerUid, cow.id);
-                      router.push(`./../chat/${convId}`);
-                    } catch (e) {
-                      console.error('createConversation error', e);
-                      setError('কথোপকথন শুরু করা যায়নি।');
-                    }
-                  }}
+              onPress={async () => {
+                try {
+                  const farmerUid = cow.farmer_id || cow.farmerId;
+                  const convId = await createConversation(farmerUid, cow.id);
+                  router.push(`./../chat/${convId}`);
+                } catch (e) {
+                  console.error("createConversation error", e);
+                  setError("কথোপকথন শুরু করা যায়নি।");
+                }
+              }}
               label="বয়স"
               value={`${cow.ageMonths} মাস`}
             />
@@ -358,24 +383,28 @@ export default function CowDetailsScreen() {
 
         {/* Action Buttons */}
 
-        
         {cow.status === "available" && (
           <View style={styles.actionSection}>
-            <TouchableOpacity style={styles.contactBtn}
+            <TouchableOpacity
+              style={styles.contactBtn}
               onPress={async () => {
                 try {
-                  const convId = await createConversation(cow.farmer_id || cow.farmerId, cow.id);
+                  const convId = await createConversation(
+                    cow.farmer_id || cow.farmerId,
+                    cow.id,
+                  );
                   router.push(`./../chat/${convId}`);
                 } catch (e) {
-                  console.error('createConversation error', e);
-                  setError('কথোপকথন শুরু করা যায়নি।');
+                  console.error("createConversation error", e);
+                  setError("কথোপকথন শুরু করা যায়নি।");
                 }
               }}
             >
               <Ionicons name="call" size={18} color={Colors.white} />
               <Text style={styles.contactBtnText}>যোগাযোগ করুন</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.bookBtn} 
+            <TouchableOpacity
+              style={styles.bookBtn}
               onPress={() => router.push(`./../orders/book?cowId=${id}`)}
             >
               <Ionicons

@@ -12,13 +12,14 @@ export default function BuyerTabLayout() {
           backgroundColor: Colors.white,
           borderTopColor: Colors.border,
           borderTopWidth: 1,
-          height: 62,
+          height: 80,
           paddingBottom: 8,
           paddingTop: 6,
         },
         tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
         headerShown: false,
       }}
+      
     >
       <Tabs.Screen
         name="home"
@@ -32,8 +33,10 @@ export default function BuyerTabLayout() {
       <Tabs.Screen
         name="chat"
         options={{
-          title: 'চ্যাট',
-          tabBarIcon: ({ color, size }) => <Ionicons name="chatbubbles" size={size} color={color} />,
+          title: "চ্যাট",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="chatbubbles" size={size} color={color} />
+          ),
         }}
       />
       <Tabs.Screen

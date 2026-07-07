@@ -12,7 +12,7 @@ export default function BuyerTabLayout() {
           backgroundColor: Colors.white,
           borderTopColor: Colors.border,
           borderTopWidth: 1,
-          height: 62,
+          height: 80,
           paddingBottom: 8,
           paddingTop: 6,
         },

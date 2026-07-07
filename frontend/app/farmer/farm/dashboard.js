@@ -1,27 +1,27 @@
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import { useCallback, useEffect, useState } from "react";
 import {
-    ActivityIndicator,
-    FlatList,
-    Image,
-    RefreshControl,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  FlatList,
+  Image,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import {
-    BorderRadius,
-    Colors,
-    FontSize,
-    Shadow,
-    Spacing,
+  BorderRadius,
+  Colors,
+  FontSize,
+  Shadow,
+  Spacing,
 } from "../../../constants/theme";
 import { useAuth } from "../../../context/AuthContext";
-import { collection, getDocs, query, where } from "firebase/firestore";
-import { auth as firebaseAuth, db } from "../../../firebaseConfig";
+import { db, auth as firebaseAuth } from "../../../firebaseConfig";
 
 const toNumber = (value) => Number(value) || 0;
 
@@ -166,9 +166,7 @@ export default function FarmerHomeScreen() {
       );
 
       const cowsList = cowSnapshots.flatMap((snapshot) =>
-        snapshot.docs.map((doc) =>
-          normalizeCow({ id: doc.id, ...doc.data() }),
-        ),
+        snapshot.docs.map((doc) => normalizeCow({ id: doc.id, ...doc.data() })),
       );
 
       const thirtyDaysAgo = new Date();
@@ -177,10 +175,7 @@ export default function FarmerHomeScreen() {
       const cowsWithMilkStats = await Promise.all(
         cowsList.map(async (cow) => {
           const photosSnap = await getDocs(
-            query(
-              collection(db, "cow_photos"),
-              where("cow_id", "==", cow.id),
-            ),
+            query(collection(db, "cow_photos"), where("cow_id", "==", cow.id)),
           );
 
           const photos = photosSnap.docs
@@ -257,6 +252,9 @@ export default function FarmerHomeScreen() {
       >
         <View style={styles.circle1} />
         <View style={styles.circle2} />
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <Ionicons name="arrow-back" size={22} color={Colors.white} />
+        </TouchableOpacity>
         <View style={styles.headerTop}>
           <View>
             <Text style={styles.greeting}>{greeting()}, 👨‍🌾</Text>
@@ -282,7 +280,8 @@ export default function FarmerHomeScreen() {
           <Text style={styles.statNumber}>
             {myCows
               .reduce((sum, c) => sum + (c.milkProduction || 0), 0)
-              .toFixed(1)}L
+              .toFixed(1)}
+            L
           </Text>
           <Text style={styles.statLabel}>মোট দুধ</Text>
         </View>
@@ -390,6 +389,16 @@ const styles = StyleSheet.create({
     bottom: 10,
     left: 40,
   },
+  backBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: Spacing.sm,
+  },
+
   headerTop: {
     flexDirection: "row",
     justifyContent: "space-between",

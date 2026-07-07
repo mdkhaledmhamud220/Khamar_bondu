@@ -380,7 +380,7 @@ export default function BookingScreen() {
           cowId: cow.id,
           name: cowData.name,
           breed: cowData.breed,
-          price: cowData.price,
+          price: cowData.sale_price,
           gender: cowData.gender,
           district: 'dhaka',
           ageMonths: cowData.age_months,

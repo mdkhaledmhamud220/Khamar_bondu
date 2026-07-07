@@ -1,23 +1,24 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { doc, getDoc } from "firebase/firestore";
 import { useEffect, useState } from "react";
-import { Alert } from "react-native";
 import {
-    ActivityIndicator,
-    Image,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Image,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import {
-    BorderRadius,
-    Colors,
-    FontSize,
-    Shadow,
-    Spacing,
+  BorderRadius,
+  Colors,
+  FontSize,
+  Shadow,
+  Spacing,
 } from "../../../constants/theme";
+import { db } from "../../../firebaseConfig";
 
 // Mock data - same as home.js
 const MOCK_COWS = [
@@ -145,27 +146,71 @@ export default function CowDetailsScreen() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    const loadCow = async () => {
+    const loadOrder = async () => {
       try {
+        setLoading(true);
         setError(null);
-        // Simulate API call
-        await new Promise((resolve) => setTimeout(resolve, 300));
 
-        // Find cow from mock data
-        const foundCow = MOCK_COWS.find((c) => c.id === id);
-        if (foundCow) {
-          setCow(foundCow);
-        } else {
-          setError("গরু তথ্য পাওয়া যায়নি।");
+        const orderRef = doc(db, "orders", id);
+        const orderSnap = await getDoc(orderRef);
+
+        if (!orderSnap.exists()) {
+          setError("অর্ডার পাওয়া যায়নি।");
+          return;
         }
+
+        const data = orderSnap.data();
+
+        setCow({
+          id: orderSnap.id,
+
+          name: data.name,
+          breed: data.breed,
+          price: data.price,
+
+          gender: data.gender,
+          district: data.district,
+
+          ageMonths: data.ageMonths,
+          weightKg: data.weightKg,
+
+          photos: data.photos || [],
+
+          healthScore: data.healthScore || 0,
+          healthGrade: data.healthGrade || "-",
+
+          description: data.description || "",
+
+          vaccination: data.vaccination || "N/A",
+
+          lastHealthCheck: data.lastHealthCheck || "N/A",
+
+          sellerName: data.sellerName || "Unknown",
+
+          sellerPhone: data.sellerPhone || "",
+
+          status: data.status,
+
+          order_status: data.status,
+
+          bookingCode: data.bookingCode,
+
+          deliveryDate: data.deliveryDate,
+
+          paymentMethod: data.paymentMethod,
+
+          createdAt: data.createdAt,
+        });
       } catch (e) {
-        setError("তথ্য লোড করতে সমস্যা হয়েছে।");
+        console.log(e);
+
+        setError("অর্ডার লোড করা যায়নি।");
       } finally {
         setLoading(false);
       }
     };
 
-    loadCow();
+    loadOrder();
   }, [id]);
 
   if (loading) {
@@ -232,9 +277,11 @@ export default function CowDetailsScreen() {
           <View
             style={[
               styles.statusBadgeLarge,
-              cow.status === "available"
-                ? styles.statusAvailable
-                : styles.statusReserved,
+              <Text style={styles.statusText}>{cow.order_status}</Text> ? (
+                styles.statusAvailable
+              ) : (
+                styles.statusReserved
+              ),
             ]}
           >
             <Text style={styles.statusText}>
@@ -374,45 +421,71 @@ export default function CowDetailsScreen() {
 
         {/* Action Buttons */}
 
-
         <View style={styles.actionSection}>
-        {/* Contact button সবসময় থাকবে */}
-        <TouchableOpacity
-          style={styles.contactBtn}
-          onPress={() => router.push(`./../chat/${cow.id}`)}
-        >
-          <Ionicons name="call" size={18} color={Colors.white} />
-          <Text style={styles.contactBtnText}>যোগাযোগ করুন</Text>
-        </TouchableOpacity>
+          {/* Contact button সবসময় থাকবে */}
+          <TouchableOpacity
+            style={styles.contactBtn}
+            onPress={() => router.push(`./../chat/${cow.id}`)}
+          >
+            <Ionicons name="call" size={18} color={Colors.white} />
+            <Text style={styles.contactBtnText}>যোগাযোগ করুন</Text>
+          </TouchableOpacity>
 
-        {/* Dynamic Order Button */}
-        {!cow.order_status && cow.status === "available" && (
-        <TouchableOpacity style={styles.bookBtn}>
-            <Ionicons name="checkmark-circle" size={18} color={Colors.primary} />
-            <Text style={styles.bookBtnText}>বুকিং করুন</Text>
-        </TouchableOpacity>
-        )}
+          {/* Dynamic Order Button */}
+          {!cow.order_status && cow.status === "available" && (
+            <TouchableOpacity style={styles.bookBtn}>
+              <Ionicons
+                name="checkmark-circle"
+                size={18}
+                color={Colors.primary}
+              />
+              <Text style={styles.bookBtnText}>বুকিং করুন</Text>
+            </TouchableOpacity>
+          )}
 
-        {cow.order_status === "pending" && (
-        <TouchableOpacity style={[styles.bookBtn, styles.warningBtn]}>
-            <Ionicons name="close-circle" size={18} color={Colors.warning} />
-            <Text style={[styles.bookBtnText, { color: Colors.warning }]}>
-            Cancel Request
-            </Text>
-        </TouchableOpacity>
-        )}
+          {cow.order_status === "pending" && (
+            <TouchableOpacity style={[styles.bookBtn, styles.warningBtn]}>
+              <Ionicons name="close-circle" size={18} color={Colors.warning} />
+              <Text style={[styles.bookBtnText, { color: Colors.warning }]}>
+                Cancel Request
+              </Text>
+            </TouchableOpacity>
+          )}
 
-        {cow.order_status === "confirmed" && (
-        <TouchableOpacity style={[styles.bookBtn, styles.dangerBtn]}>
-            <Ionicons name="close" size={18} color={Colors.error} />
-            <Text style={[styles.bookBtnText, { color: Colors.error }]}>
-            Cancel Order
-            </Text>
-        </TouchableOpacity>
-        )}
+          {cow.order_status === "confirmed" && (
+            <TouchableOpacity style={[styles.bookBtn, styles.dangerBtn]}>
+              <Ionicons name="close" size={18} color={Colors.error} />
+              <Text style={[styles.bookBtnText, { color: Colors.error }]}>
+                Cancel Order
+              </Text>
+            </TouchableOpacity>
+          )}
 
-        {/* completed / cancelled → কিছুই দেখাবে না */}
-      </View>
+          {/* completed / cancelled → কিছুই দেখাবে না */}
+        </View>
+        <View style={styles.card}>
+          <DetailRow
+            icon="document-text-outline"
+            label="Booking Code"
+            value={cow.bookingCode}
+          />
+
+          <View style={styles.divider} />
+
+          <DetailRow
+            icon="calendar-outline"
+            label="Delivery Date"
+            value={cow.deliveryDate}
+          />
+
+          <View style={styles.divider} />
+
+          <DetailRow
+            icon="card-outline"
+            label="Payment"
+            value={cow.paymentMethod}
+          />
+        </View>
       </ScrollView>
     </View>
   );
@@ -618,12 +691,12 @@ const styles = StyleSheet.create({
   },
   backBtnText: { color: Colors.white, fontWeight: "600" },
   warningBtn: {
-  borderColor: Colors.warning,
-  backgroundColor: Colors.warning + "10",
-},
+    borderColor: Colors.warning,
+    backgroundColor: Colors.warning + "10",
+  },
 
-dangerBtn: {
-  borderColor: Colors.error,
-  backgroundColor: Colors.error + "10",
-},
+  dangerBtn: {
+    borderColor: Colors.error,
+    backgroundColor: Colors.error + "10",
+  },
 });

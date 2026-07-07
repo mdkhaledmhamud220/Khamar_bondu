@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity,
   TextInput, KeyboardAvoidingView, Platform, ActivityIndicator,
-  Alert,
+  Alert, Keyboard,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -285,10 +285,26 @@ export default function ChatRoomScreen() {
     grouped.push({ ...msg, type: 'msg' });
   });
 
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+    useEffect(() => {
+      const showSub = Keyboard.addListener("keyboardDidShow", (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      });
+  
+      const hideSub = Keyboard.addListener("keyboardDidHide", () => {
+        setKeyboardHeight(0);
+      });
+  
+      return () => {
+        showSub.remove();
+        hideSub.remove();
+      };
+    }, []);
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={0}
     >
       {/* Header */}
@@ -403,7 +419,7 @@ export default function ChatRoomScreen() {
       )}
 
       {/* Input bar */}
-      <View style={styles.inputBar}>
+      <View style={[styles.inputBar, { marginBottom: keyboardHeight, paddingBottom:25 }]}>
         <TouchableOpacity
           style={[styles.iconBtn, showQuick && styles.iconBtnActive]}
           onPress={() => setShowQuick(!showQuick)}
@@ -491,7 +507,7 @@ const styles = StyleSheet.create({
   quickChip: { backgroundColor: Colors.accentPale, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: BorderRadius.full, borderWidth: 1, borderColor: Colors.border },
   quickChipText: { fontSize: FontSize.sm, color: Colors.primary, fontWeight: '600' },
 
-  inputBar:    { flexDirection: 'row', alignItems: 'flex-end', backgroundColor: Colors.white, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, paddingBottom: Platform.OS === 'ios' ? 24 : Spacing.md, borderTopWidth: 1, borderTopColor: Colors.border, gap: Spacing.sm },
+  inputBar: { flexDirection: "row", alignItems: "center", height: 90, paddingHorizontal: Spacing.md, backgroundColor: Colors.white, borderTopWidth: 1, borderTopColor: Colors.border,},
   iconBtn:     { width: 40, height: 40, borderRadius: 20, backgroundColor: Colors.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
   iconBtnActive:{ backgroundColor: Colors.accentPale },
   textInput:   { flex: 1, fontSize: FontSize.md, color: Colors.textPrimary, maxHeight: 120, paddingTop: Spacing.sm, paddingBottom: Spacing.sm },
