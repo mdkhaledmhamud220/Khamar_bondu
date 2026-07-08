@@ -133,11 +133,11 @@ export default function AddCowScreen() {
       Alert.alert("✅ সফল!", "গরু সফলভাবে যোগ করা হয়েছে।", [
         {
           text: "দেখুন",
-          onPress: () => router.replace(`/cows/${newCowRef.id}`),
+          onPress: () => router.replace(`./${newCowRef.id}`),
         },
         {
           text: "আরো যোগ করুন",
-          onPress: () => router.replace(`/cows/add?farmId=${farmId}`),
+          onPress: () => router.replace(`./../(tabs)/home?farmId=${farmId}`),
         },
       ]);
     } catch (err) {
